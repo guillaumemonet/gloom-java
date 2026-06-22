@@ -1,0 +1,429 @@
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    // LWJGL 3 « moderne » (GLFW + OpenGL + OpenAL).
+    lwjglVersion = '3.3.4'
+    // Natives Windows x64 (poste de dev). Ajouter d'autres classifiers si besoin.
+    lwjglNatives = 'natives-windows'
+}
+
+dependencies {
+    implementation platform("org.lwjgl:lwjgl-bom:$lwjglVersion")
+
+    implementation 'org.lwjgl:lwjgl'
+    implementation 'org.lwjgl:lwjgl-glfw'
+    implementation 'org.lwjgl:lwjgl-opengl'
+    implementation 'org.lwjgl:lwjgl-openal'
+
+    runtimeOnly "org.lwjgl:lwjgl::$lwjglNatives"
+    runtimeOnly "org.lwjgl:lwjgl-glfw::$lwjglNatives"
+    runtimeOnly "org.lwjgl:lwjgl-opengl::$lwjglNatives"
+    runtimeOnly "org.lwjgl:lwjgl-openal::$lwjglNatives"
+}
+
+// Le portage conserve la disposition src/ NetBeans existante (pas src/main/java).
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src']
+        }
+        // Les assets du jeu sont lus directement depuis le dépôt source GloomAmiga via
+        // la couche FileIo : pas de resources Gradle à empaqueter.
+        resources {
+            srcDirs = []
+        }
+    }
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+base {
+    archivesName = 'gloom'
+}
+
+application {
+    // Point d'entrée réel du moteur (entrypoint de gloom.s → gloom.host.Main).
+    mainClass = 'gloom.host.Main'
+    applicationName = 'Gloom'
+}
+
+// Les assets du jeu (dépôt GloomAmiga) sont résolus relativement à la racine du
+// projet (parent de java/). On exécute donc depuis cette racine.
+def assetRoot = projectDir.parentFile
+
+tasks.named('run') {
+    workingDir = assetRoot
+    systemProperties System.getProperties().subMap(['w', 'h', 'scale', 'map', 'tile', 'engine', 'medspeed'])
+}
+
+// Lance la VARIANTE gloom2.s (planaire/AGA : focshft 7 + castrots128). Même jeu, projection
+// « Deluxe ». Équivaut à `gradle run -Dengine=gloom2`.
+tasks.register('run2', JavaExec) {
+    group = 'application'
+    description = 'Lance la variante moteur gloom2.s (focshft 7 / castrots128)'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.host.Main'
+    workingDir = assetRoot
+    systemProperties System.getProperties().subMap(['w', 'h', 'scale', 'map', 'tile', 'medspeed'])
+    systemProperty 'engine', 'gloom2'
+}
+
+// Vérification de la disposition mémoire (garde-fou de non-régression du portage).
+// Doit afficher « TOUT OK ».
+tasks.register('checkLayout', JavaExec) {
+    group = 'verification'
+    description = 'Vérifie la disposition mémoire du portage (doit afficher TOUT OK)'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.CheckLayout'
+    workingDir = assetRoot
+}
+
+// Sous-système 01 — Math fondamental : harnais de cohérence (RNG, calcangle, findanglesign).
+// Doit afficher « TOUT OK ».
+tasks.register('mathTest', JavaExec) {
+    group = 'verification'
+    description = 'Contrôle de cohérence du sous-système 01 (math). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.MathTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 02 — Allocateur + listes chaînées + tables précalc. Doit afficher « TOUT OK ».
+tasks.register('listTest', JavaExec) {
+    group = 'verification'
+    description = 'Contrôle de cohérence du sous-système 02 (alloc/listes/tables). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.ListTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 03 — Palettes & ombrage. Doit afficher « TOUT OK ».
+tasks.register('paletteTest', JavaExec) {
+    group = 'verification'
+    description = 'Contrôle de cohérence du sous-système 03 (palettes/darktable). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.PaletteTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 04b — Chargement map & textures. Doit afficher « TOUT OK ».
+tasks.register('mapTest', JavaExec) {
+    group = 'verification'
+    description = 'Contrôle de cohérence du sous-système 04b (loadfile/initmap/textures). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.MapTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 04c — Événements & géométrie dynamique. Doit afficher « TOUT OK ».
+tasks.register('eventTest', JavaExec) {
+    group = 'verification'
+    description = 'Contrôle de cohérence du sous-système 04c (events/doors/rotpolys/anims). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.EventTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 05a — Caméra + collecte des murs visibles. Doit afficher « TOUT OK ».
+tasks.register('renderTest', JavaExec) {
+    group = 'verification'
+    description = 'Contrôle de cohérence du sous-système 05a (caméra/makewalls/makeoutlist). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.RenderTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 05b — Rasterisation des murs → framebuffer (+ PNG render05b.png).
+tasks.register('renderWallTest', JavaExec) {
+    group = 'verification'
+    description = 'Rasterise un mur synthétique vers framebuffer (castwalls/renderwalls). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.RenderWallTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 05c-1 — Scène complète : murs + sol + plafond (+ PNG render05c.png).
+tasks.register('renderSceneTest', JavaExec) {
+    group = 'verification'
+    description = 'Rend une scène (murs+sol+plafond perspective). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.RenderSceneTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 05c-2 — Sprites + strips see-through + sang (+ PNG render05c2.png).
+tasks.register('renderObjTest', JavaExec) {
+    group = 'verification'
+    description = 'Rend sprites/strips/sang (drawshapes/drawobj*/drawblood). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.RenderObjTest'
+    workingDir = assetRoot
+}
+
+// Rendu headless d'une VRAIE map → level.png (sans fenêtre). -Dmap=com1_1 -Dtile=2
+tasks.register('levelRenderTest', JavaExec) {
+    group = 'verification'
+    description = 'Charge une vraie map et rend une frame en PNG (level.png). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.LevelRenderTest'
+    workingDir = assetRoot
+    systemProperties System.getProperties().subMap(['map', 'tile', 'w', 'h', 'engine'])
+}
+
+// Sous-système 08a — Objets : harnais ObjTest (sprite/strip/sang synthétiques).
+tasks.register('objTest', JavaExec) {
+    group = 'verification'
+    description = 'Sprites/objets synthétiques. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.RenderObjTest'
+    workingDir = assetRoot
+}
+
+// Sous-systèmes 07/08b — déplacement joueur (collision murs) + IA monstre. PNG move.png.
+tasks.register('moveTest', JavaExec) {
+    group = 'verification'
+    description = 'Déplacement joueur + collision + chasse monstre. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.MoveTest'
+    workingDir = assetRoot
+}
+
+// Tir : balle joueur (checkfire/shoot/firelogic) + dégâts/mort + tir monstre (fire1). PNG fire.png.
+tasks.register('fireTest', JavaExec) {
+    group = 'verification'
+    description = 'Tir joueur + collision balle/monstre + tir monstre. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.FireTest'
+    workingDir = assetRoot
+}
+
+// Gore/sparks : étincelles d'impact + sang/gibs à la mort + décals au sol. PNG gore.png.
+tasks.register('goreTest', JavaExec) {
+    group = 'verification'
+    description = 'Étincelles + sang + gibs + décals de gore. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.GoreTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 08e — Événements de zone (checkevent → portes/téléport/sortie). PNG aucun.
+tasks.register('gameEventTest', JavaExec) {
+    group = 'verification'
+    description = 'Declenchement evenement par zone (checkevent). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.GameEventTest'
+    workingDir = assetRoot
+    systemProperties System.getProperties().subMap(['map', 'tile'])
+}
+
+// IA spécifiques des monstres (baldy/terra/ghoul/phantom/demon/lizard/troll).
+tasks.register('monsterTest', JavaExec) {
+    group = 'verification'
+    description = 'IA spécifiques des monstres. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.MonsterTest'
+    workingDir = assetRoot
+}
+
+// Lecteur de musique MED (MMD0/MMD1) : mixe sfxs/med1 → WAV + vérifie l'audio.
+tasks.register('medTest', JavaExec) {
+    group = 'verification'
+    description = 'Lecteur MED : mixe un module → WAV. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.MedTest'
+    workingDir = assetRoot
+    systemProperties System.getProperties().subMap(['mod', 'sec', 'medspeed'])
+}
+
+// Boss : dragon (mort → victoire) + deathhead (aspiration d'âme).
+tasks.register('bossTest', JavaExec) {
+    group = 'verification'
+    description = 'Comportements spéciaux des boss. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.BossTest'
+    workingDir = assetRoot
+}
+
+// Palette objets : pas de « saut » entre niveaux (rechargement des monstres par niveau).
+tasks.register('paletteJumpTest', JavaExec) {
+    group = 'verification'
+    description = 'Palette des monstres stable entre niveaux. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.PaletteJumpTest'
+    workingDir = assetRoot
+}
+
+// Powerups : ramassage → effet (thermo/invisi/bouncy/invinc/arme).
+tasks.register('powerupTest', JavaExec) {
+    group = 'verification'
+    description = 'Powerups : ramassage et effet. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.PowerupTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 09 — Audio : chargement échantillons + distribution SFX (sans OpenAL).
+tasks.register('audioTest', JavaExec) {
+    group = 'verification'
+    description = 'Audio : chargement SFX + format + distribution. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.AudioTest'
+    workingDir = assetRoot
+}
+
+// Smoke OpenAL : init backend + joue quelques sons.
+tasks.register('audioSmoke', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.AudioSmoke'
+    workingDir = assetRoot
+}
+
+// Diagnostic : décode le sprite balle (palette) sur 2 niveaux.
+tasks.register('weaponPal', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.WeaponPalTest'
+    workingDir = assetRoot
+}
+
+// Diagnostic : dump menu/story/HUD en PNG.
+tasks.register('uiShot', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.UiShotTest'
+    workingDir = assetRoot
+    systemProperties System.getProperties().subMap(['w', 'h'])
+}
+
+// Diagnostic : décode l'image titre IFF → title.png.
+tasks.register('iffTest', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.IffTest'
+    workingDir = assetRoot
+}
+
+// Décompression Crunch-Mania (CrM2) : décrunche txts/roof1 → roof1.png.
+tasks.register('decrunchTest', JavaExec) {
+    group = 'verification'
+    description = 'Decompression Crunch-Mania (roof1). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.DecrunchTest'
+    workingDir = assetRoot
+}
+
+// Mort du joueur : playerdie→playerdeath→respawn→playerlogic0 + game over.
+tasks.register('deathTest', JavaExec) {
+    group = 'verification'
+    description = 'Mort du joueur (respawn + game over). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.DeathTest'
+    workingDir = assetRoot
+}
+
+// Régression : ouverture de porte (dodoors appelé par tick).
+tasks.register('doorTest', JavaExec) {
+    group = 'verification'
+    description = 'Ouverture de porte (exec_opendoor + dodoors). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.DoorTest'
+    workingDir = assetRoot
+}
+
+// Sous-système 10 — Flot de jeu : script → enchaînement des niveaux.
+tasks.register('gameFlowTest', JavaExec) {
+    group = 'verification'
+    description = 'Flot de jeu (script, enchainement niveaux, finished). Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.GameFlowTest'
+    workingDir = assetRoot
+}
+
+// Harnais de validation de la chaîne d'affichage : fenêtre + palette + framebuffer de test.
+tasks.register('displayTest', JavaExec) {
+    group = 'application'
+    description = "Teste l'afficheur LWJGL : fenêtre + framebuffer chunky de test"
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.host.DisplayTest'
+    workingDir = assetRoot
+}
+
+// ===========================================================================
+// Distribution native autonome (jpackage)
+// ---------------------------------------------------------------------------
+// `gradle jpackage`          → build/jpackage/Gloom  : app-image (dossier exécutable,
+//                              JRE embarqué + assets bundlés, AUCUN outil externe requis).
+// `gradle jpackageInstaller` → installeur natif (msi sous Windows [nécessite WiX], dmg/deb).
+//
+// Les assets GloomAmiga sont copiés dans l'app et l'exécutable est lancé avec
+// -Dgloom.assets=$APPDIR/assets (jeton résolu au lancement par le lanceur jpackage).
+// NB : seuls les sources .s/.bb2 de Gloom sont domaine public ; les assets ne sont PAS
+// redistribuables → cette distribution est pour un usage PERSONNEL.
+// ===========================================================================
+def gloomAssets = file("${assetRoot}/../GloomAmiga")
+def jpackageInputDir = layout.buildDirectory.dir('jpackage-input')
+def jpackageOutDir = layout.buildDirectory.dir('jpackage')
+def isWindows = System.getProperty('os.name').toLowerCase().contains('win')
+def isMac = System.getProperty('os.name').toLowerCase().contains('mac')
+def jpackageTool = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+        .get().metadata.installationPath.file('bin/jpackage' + (isWindows ? '.exe' : '')).asFile
+
+// Rassemble le jar applicatif + les dépendances (LWJGL + natives) + les assets.
+tasks.register('jpackageStage', Copy) {
+    group = 'distribution'
+    description = "Prépare l'entrée jpackage (jar + natives LWJGL + assets GloomAmiga)"
+    dependsOn tasks.named('jar')
+    into jpackageInputDir
+    from(tasks.named('jar').flatMap { it.archiveFile })       // gloom.jar
+    from(configurations.runtimeClasspath)                     // jars LWJGL + natives-*
+    into('assets') {                                          // → input/assets (= $APPDIR/assets)
+        from(gloomAssets) {
+            exclude '.git/**', 'prog/**', 'data/**', '**/*.bb2', '*.s', 's/**'
+        }
+    }
+}
+
+def jpackageArgs = { String type ->
+    [jpackageTool.absolutePath,
+     '--type', type,
+     '--name', 'Gloom',
+     '--app-version', '1.0',
+     '--input', jpackageInputDir.get().asFile.absolutePath,
+     '--main-jar', tasks.named('jar').get().archiveFileName.get(),
+     '--main-class', 'gloom.host.Main',
+     '--dest', jpackageOutDir.get().asFile.absolutePath,
+     '--java-options', '-Dgloom.assets=$APPDIR/assets',
+     '--java-options', '-Xmx512m']
+}
+
+tasks.register('jpackage', Exec) {
+    group = 'distribution'
+    description = 'Crée une app native autonome (build/jpackage/Gloom) : JRE + assets embarqués'
+    dependsOn tasks.named('jpackageStage')
+    doFirst {
+        delete jpackageOutDir.get().dir('Gloom').asFile       // jpackage refuse une cible existante
+        delete jpackageOutDir.get().file('Gloom.app').asFile
+        jpackageOutDir.get().asFile.mkdirs()
+    }
+    commandLine jpackageArgs('app-image')
+    doLast { println "App native créée : ${jpackageOutDir.get().asFile}\\Gloom" + (isWindows ? '\\Gloom.exe' : '') }
+}
+
+tasks.register('jpackageInstaller', Exec) {
+    group = 'distribution'
+    description = "Crée un installeur natif (msi/dmg/deb selon l'OS ; Windows nécessite WiX)"
+    dependsOn tasks.named('jpackageStage')
+    doFirst { jpackageOutDir.get().asFile.mkdirs() }
+    commandLine jpackageArgs(isWindows ? 'msi' : (isMac ? 'dmg' : 'deb'))
+}

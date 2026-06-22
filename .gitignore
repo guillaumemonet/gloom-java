@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+
+# Sorties générées par les harnais de test (PNG de rendu, WAV de musique)
+*.png
+*.wav
+
+# IDE / éditeurs
+.idea/
+*.iml
+.vscode/
+nbproject/private/
+nbbuild/
+nbdist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Java
+*.class
+hs_err_pid*
+replay_pid*
