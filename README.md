@@ -1,7 +1,6 @@
 # Gloom (portage Java) — compilation & build
 
-Projet Gradle du portage Java de *Gloom*. Ce fichier explique **comment compiler les sources**
-et **comment produire un build complet en s'appuyant sur le dépôt original `GloomAmiga`** (qui
+Projet Gradle du portage Java de *Gloom*. Ce fichier explique **comment compiler les sources en s'appuyant sur le dépôt original `GloomAmiga`** (qui
 fournit les assets : maps, textures, sprites, sons, palettes, tables…).
 
 --
