@@ -4,9 +4,7 @@ Projet Gradle du portage Java de *Gloom*. Ce fichier explique **comment compiler
 et **comment produire un build complet en s'appuyant sur le dépôt original `GloomAmiga`** (qui
 fournit les assets : maps, textures, sprites, sons, palettes, tables…).
 
-> Vue d'ensemble du portage (architecture, avancement) : voir `../README.md`.
-
----
+--
 
 ## 1. Prérequis
 
@@ -81,60 +79,3 @@ gradle run -Dmedspeed=0.9        # ajuste le tempo de la musique MED
 
 Options reconnues : `-Dw=` `-Dh=` `-Dscale=` `-Dmap=` `-Dtile=` `-Dengine=gloom2` `-Dmedspeed=`
 `-Dgloom.assets=`.
-
-**Tests / harnais** (chacun doit afficher `TOUT OK` ou écrire un PNG/WAV de démonstration) :
-
-```bash
-gradle checkLayout       # garde-fou de disposition mémoire
-gradle monsterTest       # IA monstres + boss
-gradle medTest           # lecteur de musique MED → med1.wav
-gradle levelRenderTest -Dmap=map1_3   # rend une frame → level.png
-# … (voir `gradle tasks --group verification` pour la liste complète)
-```
-
----
-
-## 5. Produire un build distribuable (jpackage) avec les assets
-
-`jpackage` crée une **application native autonome** : exécutable + **JRE embarqué** + jars LWJGL
-(et natives) + **les assets `GloomAmiga` bundlés**. Aucun Java n'est requis sur la machine cible.
-
-```bash
-gradle jpackage           # → build/jpackage/Gloom/  (Windows : Gloom.exe)
-gradle jpackageInstaller  # installeur natif : .msi (Windows, nécessite WiX), .dmg, .deb
-```
-
-Ce que fait le build (cf. `build.gradle`, section *Distribution*) :
-
-1. **`jpackageStage`** rassemble dans `build/jpackage-input/` :
-   - `gloom.jar` (le jar applicatif) + tous les jars LWJGL **et leurs natives** ;
-   - une copie des assets du dépôt voisin `GloomAmiga` dans `input/assets/`
-     (en excluant `.git/`, `prog/`, `data/`, et les sources `.s`/`.bb2`).
-2. **`jpackage`** empaquette ce dossier en app-image, et configure l'exécutable avec
-   `-Dgloom.assets=$APPDIR/assets` : au lancement, le lanceur résout `$APPDIR` vers le dossier
-   `app/` du paquet, donc le jeu lit les assets **embarqués** (plus besoin du dépôt voisin).
-
-Le dossier `build/jpackage/Gloom/` est alors copiable/déplaçable tel quel et lançable via
-`Gloom.exe`.
-
-> ⚠️ **Licence** : seuls les sources `.s`/`.bb2` de Gloom sont dans le domaine public. **Les
-> assets (graphismes, sons, maps, binaire) ne sont PAS redistribuables.** Un paquet jpackage
-> embarque ces assets : il est destiné à un **usage personnel**, pas à une rediffusion.
-
----
-
-## 6. Construire pour une autre plateforme (Linux / macOS)
-
-Les natives LWJGL sont figées sur Windows. Pour cibler une autre plateforme, changez le
-classifier dans `build.gradle` :
-
-```groovy
-ext {
-    lwjglVersion = '3.3.4'
-    lwjglNatives = 'natives-linux'      // ou 'natives-macos' / 'natives-macos-arm64'
-}
-```
-
-puis relancez `gradle run` / `gradle jpackage` **sur la plateforme cible** (jpackage produit un
-paquet pour l'OS sur lequel il s'exécute). `jpackageInstaller` choisit automatiquement le type
-(`msi`/`dmg`/`deb`) selon l'OS.
