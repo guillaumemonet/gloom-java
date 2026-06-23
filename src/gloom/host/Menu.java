@@ -6,22 +6,36 @@ import gloom.Mem;
 import gloom.Render;
 import gloom.Vars;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Écran-titre / menu (sous-système 06 : dointro/initmenu/selmenu de gloom.s).
  *
  * Affiche l'image titre (IFF) et une liste d'options navigable. Version mono-joueur : les options
- * liées au 2 joueurs / lien série / Defender sont omises (hors périmètre). Rendu côté hôte.
+ * liées au 2 joueurs / lien série / Defender sont omises (hors périmètre). « CONTINUE FROM <épisode> »
+ * apparaît pour chaque point de contrôle déverrouillé (cf. {@link Progress}). Rendu côté hôte.
  */
 public final class Menu {
 
-    public static final int ONE_PLAYER = 0, ABOUT = 1, EXIT = 2;
-    private static final String[] OPTS = { "ONE PLAYER GAME", "ABOUT GLOOM", "EXIT GLOOM" };
+    /** Action choisie par l'utilisateur. */
+    public enum Action { NONE, NEW_GAME, CONTINUE, ABOUT, EXIT }
+
+    private static final class Entry {
+        final String label; final Action action; final int checkpoint;
+        Entry(String label, Action action, int checkpoint) {
+            this.label = label; this.action = action; this.checkpoint = checkpoint;
+        }
+    }
 
     private int width, height;
     private Iff title;
     private int curr = 0;
     private boolean pUp, pDown, pFire;
-    public int selected = -1;                // option choisie (>=0) une fois validée
+    private final List<Entry> entries = new ArrayList<>();
+
+    public Action selectedAction = Action.NONE;   // action validée
+    public int selectedCheckpoint = 0;            // point de contrôle pour CONTINUE
 
     public void init(int w, int h) {
         width = w; height = h;
@@ -29,14 +43,31 @@ public final class Menu {
         try {
             title = Iff.decode(Assets.incbin("title"), Assets.incbin("title.pal"));
         } catch (RuntimeException e) { title = null; }
-        selected = -1; curr = 0; pUp = pDown = pFire = true;   // ignore les touches déjà tenues
+
+        // construit le menu : nouvelle partie, reprises déverrouillées, à propos, quitter.
+        entries.clear();
+        entries.add(new Entry("ONE PLAYER GAME", Action.NEW_GAME, 0));
+        List<String> labels = Progress.labels();
+        int unlocked = Progress.loadUnlocked();
+        for (int i = 1; i <= unlocked && i <= labels.size(); i++) {
+            entries.add(new Entry("CONTINUE FROM " + labels.get(i - 1), Action.CONTINUE, i));
+        }
+        entries.add(new Entry("ABOUT GLOOM", Action.ABOUT, 0));
+        entries.add(new Entry("EXIT GLOOM", Action.EXIT, 0));
+
+        selectedAction = Action.NONE; selectedCheckpoint = 0;
+        curr = 0; pUp = pDown = pFire = true;   // ignore les touches déjà tenues
     }
 
     /** Navigation (fronts montants) ; valide l'option sur appui-feu. */
     public void update(boolean up, boolean down, boolean fire) {
-        if (up && !pUp) curr = (curr + OPTS.length - 1) % OPTS.length;
-        if (down && !pDown) curr = (curr + 1) % OPTS.length;
-        if (fire && !pFire) selected = curr;
+        int n = entries.size();
+        if (up && !pUp) curr = (curr + n - 1) % n;
+        if (down && !pDown) curr = (curr + 1) % n;
+        if (fire && !pFire) {
+            selectedAction = entries.get(curr).action;
+            selectedCheckpoint = entries.get(curr).checkpoint;
+        }
         pUp = up; pDown = down; pFire = fire;
     }
 
@@ -45,9 +76,9 @@ public final class Menu {
         if (title != null) title.blitTo(fb, width, height);
         else for (int i = 0; i < width * height; i++) Mem.ww(fb + i * 2, 0);
         int lh = Font.BH + 2;                                // hauteur de ligne (grande fonte 8×10)
-        int y = height - OPTS.length * lh - 8;
-        for (int i = 0; i < OPTS.length; i++) {
-            String s = (i == curr ? "> " : "  ") + OPTS[i];
+        int y = height - entries.size() * lh - 8;
+        for (int i = 0; i < entries.size(); i++) {
+            String s = (i == curr ? "> " : "  ") + entries.get(i).label;
             // couleurs d'origine : texte violet (sélection plus claire), comme l'écran-titre Gloom
             Font.drawCenteredBig(fb, width, height, y, s, i == curr ? 0xd9f : 0x96f);
             y += lh;

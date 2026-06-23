@@ -20,13 +20,13 @@ import gloom.Mem;
  */
 public final class Font {
 
-    /** Une fonte décodée : glyphes (niveaux de teinte par pixel) + métriques. */
+    /** Une fonte décodée : glyphes (indice de teinte par pixel) + facteur de luminosité par indice. */
     private static final class Glyphs {
         final int w, h, advance;
-        final byte[][] glyph;       // par index : w*h niveaux (0 = transparent, 1..maxLevel)
-        final int maxLevel;
-        Glyphs(int w, int h, int advance, byte[][] glyph, int maxLevel) {
-            this.w = w; this.h = h; this.advance = advance; this.glyph = glyph; this.maxLevel = maxLevel;
+        final byte[][] glyph;       // par caractère : w*h indices couleur (0 = transparent, 1..N)
+        final float[] bright;       // indice couleur → facteur [0..1] (depuis la palette interne de la fonte)
+        Glyphs(int w, int h, int advance, byte[][] glyph, float[] bright) {
+            this.w = w; this.h = h; this.advance = advance; this.glyph = glyph; this.bright = bright;
         }
     }
 
@@ -38,11 +38,20 @@ public final class Font {
     public static final int CW = 6, CH = 8;
     public static final int BW = 8, BH = 10;
 
+    private static final int NIDX = 16;     // indices couleur gérés (palette interne de la fonte)
+
     private static Glyphs load(String path, int w, int h, int nchars) {
         try {
             byte[] f = Assets.read(path);
+            // palette interne de la fonte (font[0] → 16 mots $0RGB) → luminance par indice
+            int p0 = u32(f, 0);
+            float[] lum = new float[NIDX];
+            for (int i = 1; i < NIDX; i++) {
+                int c = u16(f, p0 + i * 2) & 0x0fff;
+                lum[i] = 0.30f * ((c >> 8) & 15) + 0.59f * ((c >> 4) & 15) + 0.11f * (c & 15);
+            }
             byte[][] glyph = new byte[nchars][];
-            int maxLevel = 1;
+            boolean[] used = new boolean[NIDX];
             for (int c = 0; c < nchars; c++) {
                 int g = u32(f, 4 + c * 4);
                 int maskOff = u32(f, g);
@@ -54,16 +63,22 @@ public final class Font {
                         for (int p = 0; p < PLANES; p++) {
                             if ((u16(f, g + 8 + (r * PLANES + p) * 2) >> (15 - x) & 1) != 0) idx |= 1 << p;
                         }
+                        if (idx >= NIDX) idx = NIDX - 1;       // garde-fou (les fontes restent < 16)
                         px[r * w + x] = (byte) idx;
-                        if (idx > maxLevel) maxLevel = idx;
+                        if (idx > 0) used[idx] = true;
                     }
                 }
                 glyph[c] = px;
             }
-            return new Glyphs(w, h, w, glyph, maxLevel);
+            // normalise : l'indice utilisé le plus lumineux = 1.0 (= couleur demandée pleine)
+            float maxLum = 0.0001f;
+            for (int i = 1; i < NIDX; i++) if (used[i] && lum[i] > maxLum) maxLum = lum[i];
+            float[] bright = new float[NIDX];
+            for (int i = 1; i < NIDX; i++) bright[i] = Math.min(1f, lum[i] / maxLum);
+            return new Glyphs(w, h, w, glyph, bright);
         } catch (Exception e) {
             System.err.println("[Font] " + path + " illisible : " + e.getMessage());
-            return new Glyphs(w, h, w, new byte[nchars][w * h], 1);
+            return new Glyphs(w, h, w, new byte[nchars][w * h], new float[NIDX]);
         }
     }
 
@@ -86,11 +101,12 @@ public final class Font {
 
     // --- rendu ---
 
-    /** Niveau de teinte (1..max) → couleur $0RGB assombrie depuis `color` (biseau). */
-    private static int shade(int color, int level, int maxLevel) {
-        if (level >= maxLevel) return color;
-        int r = (color >> 8) & 15, g = (color >> 4) & 15, b = color & 15;
-        r = r * level / maxLevel; g = g * level / maxLevel; b = b * level / maxLevel;
+    /** Facteur de luminosité [0..1] → couleur $0RGB assombrie depuis `color` (biseau). */
+    private static int shade(int color, float f) {
+        if (f >= 0.999f) return color;
+        int r = Math.round(((color >> 8) & 15) * f);
+        int g = Math.round(((color >> 4) & 15) * f);
+        int b = Math.round((color & 15) * f);
         return (r << 8) | (g << 4) | b;
     }
 
@@ -103,11 +119,11 @@ public final class Font {
                     int py = y + gy;
                     if (py < 0 || py >= fbH) continue;
                     for (int gx = 0; gx < gf.w; gx++) {
-                        int lvl = px[gy * gf.w + gx] & 0xff;
-                        if (lvl == 0) continue;                // transparent
+                        int idx = px[gy * gf.w + gx] & 0xff;
+                        if (idx == 0) continue;                // transparent
                         int pxx = x + gx;
                         if (pxx < 0 || pxx >= fbW) continue;
-                        Mem.ww(fb + (py * fbW + pxx) * 2, shade(color, lvl, gf.maxLevel));
+                        Mem.ww(fb + (py * fbW + pxx) * 2, shade(color, gf.bright[idx]));
                     }
                 }
             }

@@ -59,17 +59,17 @@ public final class Main {
             // --- menu ---
             Menu menu = new Menu();
             menu.init(W, H);
-            while (!disp.shouldClose() && !disp.key(GLFW_KEY_ESCAPE) && menu.selected < 0) {
+            while (!disp.shouldClose() && !disp.key(GLFW_KEY_ESCAPE) && menu.selectedAction == Menu.Action.NONE) {
                 menu.update(keyUp(disp), keyDown(disp), readJoyb(disp) != 0);
                 menu.render();
                 present(disp, Mem.l(Vars.cop));
             }
-            if (disp.shouldClose() || disp.key(GLFW_KEY_ESCAPE) || menu.selected == Menu.EXIT) return;
-            if (menu.selected == Menu.ABOUT) { aboutScreen(disp, W, H); continue; }
+            if (disp.shouldClose() || disp.key(GLFW_KEY_ESCAPE) || menu.selectedAction == Menu.Action.EXIT) return;
+            if (menu.selectedAction == Menu.Action.ABOUT) { aboutScreen(disp, W, H); continue; }
 
-            // --- partie (ONE_PLAYER) ---
+            // --- partie (nouvelle ou reprise depuis un point de contrôle) ---
             Game game = new Game();
-            game.boot(W, H);
+            game.boot(W, H, menu.selectedAction == Menu.Action.CONTINUE ? menu.selectedCheckpoint : 0);
             while (!disp.shouldClose() && !disp.key(GLFW_KEY_ESCAPE)) {
                 if (game.scene != null) {
                     game.scene.setInput(readJoyx(disp), readJoyy(disp), readJoyb(disp), readJoys(disp));

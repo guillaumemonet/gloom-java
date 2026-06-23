@@ -245,6 +245,15 @@ tasks.register('medTest', JavaExec) {
     systemProperties System.getProperties().subMap(['mod', 'sec', 'medspeed'])
 }
 
+// Sauvegarde / reprise par point de contrôle (épisodes).
+tasks.register('saveTest', JavaExec) {
+    group = 'verification'
+    description = 'Sauvegarde + reprise par point de contrôle. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.SaveTest'
+    workingDir = assetRoot
+}
+
 // Boss : dragon (mort → victoire) + deathhead (aspiration d'âme).
 tasks.register('bossTest', JavaExec) {
     group = 'verification'

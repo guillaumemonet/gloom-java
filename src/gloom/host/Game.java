@@ -25,7 +25,7 @@ public final class Game {
 
     private static final int CMD_PICT = cmd("pict"), CMD_TEXT = cmd("text"), CMD_WAIT = cmd("wait"),
             CMD_PLAY = cmd("play"), CMD_DONE = cmd("done"), CMD_DARK = cmd("dark"),
-            CMD_LOOP = cmd("loop"), CMD_TILE = cmd("tile");
+            CMD_LOOP = cmd("loop"), CMD_TILE = cmd("tile"), CMD_REST = cmd("rest");
 
     private static final int IRELOAD = 5;
 
@@ -33,6 +33,8 @@ public final class Game {
     private int width, height;
     private String currentTile = "1";
     private int p1health, p1lives, p1weapon, p1reload;
+    private int checkpointsPassed;           // nb de « rest_ » franchis (= épisodes terminés)
+    private int skipCheckpoints;             // au boot : sauter les niveaux jusqu'à ce point de contrôle
 
     public Phase phase = Phase.STORY;
     public LevelScene scene;                 // niveau courant (null hors PLAYING)
@@ -45,13 +47,23 @@ public final class Game {
     private String storyText = "";
     private boolean prevFire;                // détection de front montant du feu
 
-    /** Démarre une nouvelle partie : framebuffer + script + 1er segment. */
+    /** Démarre une nouvelle partie depuis le début. */
     public void boot(int w, int h) {
+        boot(w, h, 0);
+    }
+
+    /**
+     * Démarre la partie, en reprenant au `skipCheckpoints`-ième point de contrôle (0 = début).
+     * Les niveaux situés avant ce point sont sautés (le script les survole en posant tile/pict).
+     */
+    public void boot(int w, int h, int skipCheckpoints) {
         width = w; height = h;
         Render.setupFramebuffer(w, h);                  // framebuffer pour écrans d'histoire/menu
         scriptBase = Assets.incbin("misc/script");
         scriptat = scriptBase;
         p1health = 0; p1lives = 5; p1weapon = 0; p1reload = IRELOAD;
+        checkpointsPassed = 0;
+        this.skipCheckpoints = skipCheckpoints;
         advance();
     }
 
@@ -65,9 +77,20 @@ public final class Game {
             else if (c == CMD_TEXT) storyText = fetchrest().trim();
             else if (c == CMD_DARK) { darkBg = true; }
             else if (c == CMD_LOOP) scriptat = scriptBase;
-            else if (c == CMD_WAIT) { phase = Phase.STORY; prevFire = true; return; } // attend le relâché+appui
-            else if (c == CMD_PLAY) { loadLevel(fetchrest().trim()); phase = Phase.PLAYING; storyText = ""; return; }
-            else fetchrest();                            // draw/show/hide/rest : cosmétique
+            else if (c == CMD_REST) {                    // point de contrôle (début d'épisode)
+                fetchrest();
+                checkpointsPassed++;
+                if (checkpointsPassed > skipCheckpoints) Progress.unlock(checkpointsPassed);
+            }
+            else if (c == CMD_WAIT) {
+                if (checkpointsPassed < skipCheckpoints) continue;   // en avance rapide : pas d'attente
+                phase = Phase.STORY; prevFire = true; return;        // attend le relâché+appui
+            }
+            else if (c == CMD_PLAY) {
+                if (checkpointsPassed < skipCheckpoints) { fetchrest(); continue; } // saute ce niveau
+                loadLevel(fetchrest().trim()); phase = Phase.PLAYING; storyText = ""; return;
+            }
+            else fetchrest();                            // draw/show/hide : cosmétique
         }
     }
 
@@ -191,6 +214,7 @@ public final class Game {
         scriptat = scriptBase;
         currentTile = "1"; bg = null; darkBg = false; storyText = "";
         p1health = 0; p1lives = 5; p1weapon = 0; p1reload = IRELOAD;
+        checkpointsPassed = 0; skipCheckpoints = 0;
         over = false; scene = null;
         advance();
     }
