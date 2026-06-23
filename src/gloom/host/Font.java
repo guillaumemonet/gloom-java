@@ -4,46 +4,66 @@ import gloom.Assets;
 import gloom.Mem;
 
 /**
- * Fonte AUTHENTIQUE de Gloom (misc/smallfont.bin), décodée depuis la shapetable blitter Amiga.
+ * Fontes AUTHENTIQUES de Gloom (misc/smallfont.bin 6×8, misc/bigfont.bin 8×10), décodées depuis
+ * les shapetables blitter Amiga.
  *
  * Format (rétro-ingénierie de `blit` gloom.s:1595 + `printmess2` 1368) : table d'offsets à +4
  * (char N → long à fontBase+4+N*4), puis chaque glyphe = [maskOff(l)][mod(w)][bltsize(w)][image][mask].
- * L'image est faite pour un bitmap Amiga ENTRELACÉ 7 plans : 7 mots consécutifs = les 7 plans d'UNE
- * ligne de pixels (le blit avance de 40 o = une ligne-pixel tous les 7 mots, car 280/40=7). Donc la
- * ligne r du glyphe = OR des 7 mots `image[r*7 .. r*7+6]`, et il y a (imgMots/7) lignes (7 ici).
+ * L'image cible un bitmap Amiga ENTRELACÉ 7 plans : 7 mots consécutifs = les 7 plans d'UNE ligne de
+ * pixels. La fonte n'est PAS monochrome : c'est une fonte BISEAUTÉE (3 teintes — sombre/moyen/clair),
+ * d'où les 7 plans. Pour chaque pixel on reconstitue l'INDICE de couleur (bits des 7 plans) ; 0 =
+ * transparent, sinon un NIVEAU de luminosité (1..max) rendu comme une teinte de la couleur demandée
+ * → on conserve le biseau dans n'importe quelle couleur (menu violet, histoire cyan…).
  *
  * Mapping ASCII→glyphe (printmess2) : ' '/'\\'→vide ; '0'-'9'→0-9 ; '\\''→57 ; '!'→36 ; '.'→37 ;
- * ':'→38 ; 127→39 ; lettres → (c & 31) + 9 (A→10 … Z→35). Avance = fontw (6 px).
+ * ':'→38 ; 127→39 ; lettres → (c & 31) + 9 (A→10 … Z→35).
  */
 public final class Font {
 
-    public static final int CW = 6, CH = 8;        // largeur d'avance / hauteur de ligne
-    private static final int PLANES = 7, FONTW = 6, ROWS = 7;
-    private static final boolean[][] GLYPH = new boolean[64][];   // masque fontw×rows par index
+    /** Une fonte décodée : glyphes (niveaux de teinte par pixel) + métriques. */
+    private static final class Glyphs {
+        final int w, h, advance;
+        final byte[][] glyph;       // par index : w*h niveaux (0 = transparent, 1..maxLevel)
+        final int maxLevel;
+        Glyphs(int w, int h, int advance, byte[][] glyph, int maxLevel) {
+            this.w = w; this.h = h; this.advance = advance; this.glyph = glyph; this.maxLevel = maxLevel;
+        }
+    }
 
-    /** Palette de la fonte (16 entrées $0RGB) — recopiée sur les index 0..15 des images (makeiff 11276). */
-    public static final int[] FONTPAL = new int[16];
+    private static final int PLANES = 7;
+    private static final Glyphs SMALL = load("misc/smallfont.bin", 6, 8, 64);
+    private static final Glyphs BIG   = load("misc/bigfont.bin", 8, 10, 40);
 
-    static {
+    // métriques héritées (HUD/anciens appels) = petite fonte ; BW/BH = grande fonte
+    public static final int CW = 6, CH = 8;
+    public static final int BW = 8, BH = 10;
+
+    private static Glyphs load(String path, int w, int h, int nchars) {
         try {
-            byte[] f = Assets.read("misc/smallfont.bin");
-            int p0 = u32(f, 0);                                    // font[0] : offset de la palette interne
-            FONTPAL[0] = 0;
-            for (int i = 1; i <= 15; i++) FONTPAL[i] = u16(f, p0 + 2 + (i - 1) * 2) & 0x0fff;
-            for (int c = 0; c < 63; c++) {
+            byte[] f = Assets.read(path);
+            byte[][] glyph = new byte[nchars][];
+            int maxLevel = 1;
+            for (int c = 0; c < nchars; c++) {
                 int g = u32(f, 4 + c * 4);
                 int maskOff = u32(f, g);
-                int rows = ((maskOff - 8) / 2) / PLANES;            // = 7
-                boolean[] bits = new boolean[FONTW * ROWS];
-                for (int r = 0; r < rows && r < ROWS; r++) {
-                    int orw = 0;
-                    for (int p = 0; p < PLANES; p++) orw |= u16(f, g + 8 + (r * PLANES + p) * 2);
-                    for (int x = 0; x < FONTW; x++) bits[r * FONTW + x] = ((orw >> (15 - x)) & 1) != 0;
+                int rows = ((maskOff - 8) / 2) / PLANES;       // 7 (small) ou 9 (big)
+                byte[] px = new byte[w * h];
+                for (int r = 0; r < rows && r < h; r++) {
+                    for (int x = 0; x < w; x++) {
+                        int idx = 0;                            // indice couleur = bits des 7 plans
+                        for (int p = 0; p < PLANES; p++) {
+                            if ((u16(f, g + 8 + (r * PLANES + p) * 2) >> (15 - x) & 1) != 0) idx |= 1 << p;
+                        }
+                        px[r * w + x] = (byte) idx;
+                        if (idx > maxLevel) maxLevel = idx;
+                    }
                 }
-                GLYPH[c] = bits;
+                glyph[c] = px;
             }
+            return new Glyphs(w, h, w, glyph, maxLevel);
         } catch (Exception e) {
-            System.err.println("[Font] smallfont.bin illisible : " + e.getMessage());
+            System.err.println("[Font] " + path + " illisible : " + e.getMessage());
+            return new Glyphs(w, h, w, new byte[nchars][w * h], 1);
         }
     }
 
@@ -51,67 +71,68 @@ public final class Font {
     private static int u32(byte[] d, int o) { return (u16(d, o) << 16) | u16(d, o + 2); }
 
     /** ASCII → index de glyphe (printmess2, gloom.s:1376) ; -1 = espace (avance seulement). */
-    private static int glyphIndex(char ch) {
+    private static int glyphIndex(char ch, int nchars) {
+        int idx;
         if (ch == ' ' || ch == '\\') return -1;
-        if (ch >= '0' && ch <= '9') return ch - '0';
-        if (ch == '\'') return 57;
-        if (ch == '!') return 36;
-        if (ch == '.') return 37;
-        if (ch == ':') return 38;
-        if (ch == 127) return 39;
-        return (ch & 31) + 9;                      // lettres (A→10 … Z→35) ; insensible à la casse
+        else if (ch >= '0' && ch <= '9') idx = ch - '0';
+        else if (ch == '\'') idx = 57;
+        else if (ch == '!') idx = 36;
+        else if (ch == '.') idx = 37;
+        else if (ch == ':') idx = 38;
+        else if (ch == 127) idx = 39;
+        else idx = (ch & 31) + 9;                              // lettres (A→10 … Z→35), insensible casse
+        return idx < nchars ? idx : -1;                        // glyphe absent (ex. ' dans bigfont) → vide
     }
 
-    /** Dessine `s` (couleur $0RGB) en (x,y), taille 1× (HUD). */
-    public static void draw(int fb, int fbW, int fbH, int x, int y, String s, int color) {
-        drawScaled(fb, fbW, fbH, x, y, s, color, 1);
+    // --- rendu ---
+
+    /** Niveau de teinte (1..max) → couleur $0RGB assombrie depuis `color` (biseau). */
+    private static int shade(int color, int level, int maxLevel) {
+        if (level >= maxLevel) return color;
+        int r = (color >> 8) & 15, g = (color >> 4) & 15, b = color & 15;
+        r = r * level / maxLevel; g = g * level / maxLevel; b = b * level / maxLevel;
+        return (r << 8) | (g << 4) | b;
     }
 
-    /** Variante grand format (2×) avec contour noir — lisible sur fond chargé (menus, histoire). */
-    public static void drawBig(int fb, int fbW, int fbH, int x, int y, String s, int color) {
-        // contour : 4 décalages en noir, puis le texte par-dessus
-        drawScaled(fb, fbW, fbH, x - 1, y, s, 0x000, 2);
-        drawScaled(fb, fbW, fbH, x + 1, y, s, 0x000, 2);
-        drawScaled(fb, fbW, fbH, x, y - 1, s, 0x000, 2);
-        drawScaled(fb, fbW, fbH, x, y + 1, s, 0x000, 2);
-        drawScaled(fb, fbW, fbH, x, y, s, color, 2);
-    }
-
-    /** Cœur du rendu : chaque pixel de glyphe devient un bloc scale×scale. */
-    private static void drawScaled(int fb, int fbW, int fbH, int x, int y, String s, int color, int scale) {
+    private static void drawWith(Glyphs gf, int fb, int fbW, int fbH, int x, int y, String s, int color) {
         for (int i = 0; i < s.length(); i++) {
-            int idx = glyphIndex(s.charAt(i));
-            if (idx >= 0 && idx < 64 && GLYPH[idx] != null) {
-                boolean[] g = GLYPH[idx];
-                for (int gy = 0; gy < ROWS; gy++) {
-                    for (int gx = 0; gx < FONTW; gx++) {
-                        if (!g[gy * FONTW + gx]) continue;
-                        for (int sy = 0; sy < scale; sy++) {
-                            int py = y + gy * scale + sy;
-                            if (py < 0 || py >= fbH) continue;
-                            for (int sx = 0; sx < scale; sx++) {
-                                int px = x + gx * scale + sx;
-                                if (px < 0 || px >= fbW) continue;
-                                Mem.ww(fb + (py * fbW + px) * 2, color);
-                            }
-                        }
+            int gi = glyphIndex(s.charAt(i), gf.glyph.length);
+            if (gi >= 0 && gf.glyph[gi] != null) {
+                byte[] px = gf.glyph[gi];
+                for (int gy = 0; gy < gf.h; gy++) {
+                    int py = y + gy;
+                    if (py < 0 || py >= fbH) continue;
+                    for (int gx = 0; gx < gf.w; gx++) {
+                        int lvl = px[gy * gf.w + gx] & 0xff;
+                        if (lvl == 0) continue;                // transparent
+                        int pxx = x + gx;
+                        if (pxx < 0 || pxx >= fbW) continue;
+                        Mem.ww(fb + (py * fbW + pxx) * 2, shade(color, lvl, gf.maxLevel));
                     }
                 }
             }
-            x += CW * scale;
+            x += gf.advance;
         }
     }
 
-    /** Dessine `s` centré horizontalement à la ligne y (taille 1×). */
+    /** Petite fonte (6×8) — HUD, textes secondaires. */
+    public static void draw(int fb, int fbW, int fbH, int x, int y, String s, int color) {
+        drawWith(SMALL, fb, fbW, fbH, x, y, s, color);
+    }
+
+    /** Grande fonte authentique 8×10 (menus, écrans d'histoire). */
+    public static void drawBig(int fb, int fbW, int fbH, int x, int y, String s, int color) {
+        drawWith(BIG, fb, fbW, fbH, x, y, s, color);
+    }
+
     public static void drawCentered(int fb, int fbW, int fbH, int y, String s, int color) {
-        draw(fb, fbW, fbH, (fbW - s.length() * CW) / 2, y, s, color);
+        draw(fb, fbW, fbH, (fbW - s.length() * SMALL.advance) / 2, y, s, color);
     }
 
-    /** Dessine `s` centré, grand format (2× + contour). */
     public static void drawCenteredBig(int fb, int fbW, int fbH, int y, String s, int color) {
-        drawBig(fb, fbW, fbH, (fbW - s.length() * CW * 2) / 2, y, s, color);
+        drawBig(fb, fbW, fbH, (fbW - s.length() * BIG.advance) / 2, y, s, color);
     }
 
-    public static int width(String s) { return s.length() * CW; }
-    public static int widthBig(String s) { return s.length() * CW * 2; }
+    public static int width(String s)    { return s.length() * SMALL.advance; }
+    public static int widthBig(String s) { return s.length() * BIG.advance; }
 }

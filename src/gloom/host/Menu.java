@@ -44,7 +44,7 @@ public final class Menu {
         int fb = Mem.l(Vars.cop);
         if (title != null) title.blitTo(fb, width, height);
         else for (int i = 0; i < width * height; i++) Mem.ww(fb + i * 2, 0);
-        int lh = Font.CH * 2 + 4;                            // hauteur de ligne en grand format
+        int lh = Font.BH + 2;                                // hauteur de ligne (grande fonte 8×10)
         int y = height - OPTS.length * lh - 8;
         for (int i = 0; i < OPTS.length; i++) {
             String s = (i == curr ? "> " : "  ") + OPTS[i];

@@ -94,32 +94,48 @@ gradle levelRenderTest -Dmap=map1_3   # rend une frame → level.png
 
 ---
 
-## 5. Produire un build distribuable (jpackage) avec les assets
+## 5. Produire un build distribuable (jpackage)
 
 `jpackage` crée une **application native autonome** : exécutable + **JRE embarqué** + jars LWJGL
-(et natives) + **les assets `GloomAmiga` bundlés**. Aucun Java n'est requis sur la machine cible.
+(et natives). Aucun Java n'est requis sur la machine cible.
 
 ```bash
 gradle jpackage           # → build/jpackage/Gloom/  (Windows : Gloom.exe)
 gradle jpackageInstaller  # installeur natif : .msi (Windows, nécessite WiX), .dmg, .deb
 ```
 
-Ce que fait le build (cf. `build.gradle`, section *Distribution*) :
-
-1. **`jpackageStage`** rassemble dans `build/jpackage-input/` :
-   - `gloom.jar` (le jar applicatif) + tous les jars LWJGL **et leurs natives** ;
-   - une copie des assets du dépôt voisin `GloomAmiga` dans `input/assets/`
-     (en excluant `.git/`, `prog/`, `data/`, et les sources `.s`/`.bb2`).
-2. **`jpackage`** empaquette ce dossier en app-image, et configure l'exécutable avec
-   `-Dgloom.assets=$APPDIR/assets` : au lancement, le lanceur résout `$APPDIR` vers le dossier
-   `app/` du paquet, donc le jeu lit les assets **embarqués** (plus besoin du dépôt voisin).
-
-Le dossier `build/jpackage/Gloom/` est alors copiable/déplaçable tel quel et lançable via
-`Gloom.exe`.
-
 > ⚠️ **Licence** : seuls les sources `.s`/`.bb2` de Gloom sont dans le domaine public. **Les
-> assets (graphismes, sons, maps, binaire) ne sont PAS redistribuables.** Un paquet jpackage
-> embarque ces assets : il est destiné à un **usage personnel**, pas à une rediffusion.
+> assets (graphismes, sons, maps…) ne sont PAS redistribuables.** Le paquet **n'embarque donc
+> PAS les assets** : il inclut un script qui les **télécharge** depuis le dépôt original.
+
+Contenu du paquet `build/jpackage/Gloom/` :
+
+```
+Gloom/
+├── Gloom.exe          ← lanceur natif (JRE embarqué)
+├── fetch-assets.bat   ← télécharge les assets (Windows)
+├── fetch-assets.sh    ← idem (Linux/macOS)
+├── app/               ← gloom.jar + jars LWJGL + Gloom.cfg
+└── runtime/           ← JRE
+```
+
+**Côté utilisateur final** (deux étapes) :
+
+1. Lancer **`fetch-assets.bat`** (ou `.sh`) **une fois** : il récupère les assets dans
+   `app/GloomAmiga`.
+   - **Avec git** : `git clone git@github.com:earok/GloomAmiga.git` (repli HTTPS automatique).
+   - **Sans git** : repli automatique sur le **téléchargement du ZIP** via `curl` + `tar`
+     (tous deux inclus dans Windows 10/11 ; `curl`/`wget` + `unzip`/`tar` sous Linux/macOS).
+   Aucun outil à installer dans le cas standard.
+2. Lancer **`Gloom.exe`**.
+
+Comment ça marche : l'exécutable est configuré avec `-Dgloom.assets=$APPDIR/GloomAmiga`
+(le lanceur jpackage résout `$APPDIR` vers le dossier `app/` au runtime), et le script clone
+précisément dans `app/GloomAmiga`. Le jeu y trouve donc ses assets.
+
+Le build, lui (cf. `build.gradle`) : `jpackageStage` rassemble le jar + les dépendances LWJGL
+(sans assets), `jpackage` empaquette en app-image, puis copie `fetch-assets.bat`/`.sh`
+(dossier `dist/`) à la racine du paquet.
 
 ---
 

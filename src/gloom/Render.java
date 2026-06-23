@@ -593,11 +593,15 @@ public final class Render {
         int Vs = M68k.swap(d0);                         // swap d0
         int stepS = M68k.swap(d1);                      // swap d1
         int a3 = Mem.l(a2 + Mem.uw(a4 + Defs.vd_pal) * 4); // palettes[vd_pal]
-        // « Thanx Hendrix » : sub d1,d0 ; add.l d1,d0 (amorce la retenue X)
-        Vs = Vs - stepS;
-        long prime = (Vs & 0xffffffffL) + (stepS & 0xffffffffL);
+        // « Thanx Hendrix » : sub d1,d0 (WORD !) ; add.l d1,d0 — amorce l'accumulateur swappé.
+        // CRUCIAL : le sub est en .w (low word seulement), pas en .l. Un sub 32 bits décale la
+        // partie fractionnaire → échantillonnage de texel décalé de ~1 (drift visible sur les
+        // colonnes proches/hautes + liseré au bas du mur lisant un texel hors colonne).
+        int low = (Vs & 0xFFFF) - (stepS & 0xFFFF);     // sub.w d1,d0 (le X qui en résulte est écrasé par add.l)
+        Vs = (Vs & 0xFFFF0000) | (low & 0xFFFF);
+        long prime = (Vs & 0xffffffffL) + (stepS & 0xffffffffL); // add.l d1,d0
         Vs = (int) prime;
-        int x = (int) (prime >>> 32) & 1;
+        int x = (int) (prime >>> 32) & 1;               // X = retenue de l'add.l (pour le 1er addx)
         for (int i = 0; i <= d5; i++) {                 // dbf d5 → count itérations
             int texel = Mem.ub(a0 + (short) Vs);        // move.b 0(a0,d0),d3
             Mem.ww(a1, Mem.uw(a3 + texel * 2));         // move 0(a3,d3*2),(a1)

@@ -44,6 +44,7 @@ public final class Main {
                     present(disp, Mem.l(Vars.cop));
                 }
             } else {
+                showLogo(disp, W, H);                   // logo Black Magic Software (cf. gloom.s:9394)
                 runFullGame(disp, W, H);                // menu → partie complète (script) → fin → menu
             }
         } finally {
@@ -115,6 +116,28 @@ public final class Main {
 
     /** Backend audio courant (pour pomper le streaming musique à chaque frame). */
     private static Audio AUDIO;
+
+    /**
+     * Écran logo « Black Magic Software » à l'amorçage (gloom.s:9394-9402 : makeiff/showiff sur
+     * pics/blackmagic, puis attente ~50 frames). Affiché ~2 s ou jusqu'à l'appui-feu / Échap.
+     */
+    private static void showLogo(Display disp, int W, int H) {
+        gloom.Render.setupFramebuffer(W, H);
+        int fb = Mem.l(Vars.cop);
+        gloom.Iff logo;
+        try {
+            logo = gloom.Iff.decode(gloom.Assets.incbin("pics/blackmagic"),
+                                    gloom.Assets.incbin("pics/blackmagic.pal"));
+        } catch (RuntimeException e) { return; }            // pas de logo → on passe directement au menu
+        logo.blitTo(fb, W, H);
+        boolean prevFire = true;                            // ignore un feu déjà tenu
+        for (int f = 0; f < 120 && !disp.shouldClose() && !disp.key(GLFW_KEY_ESCAPE); f++) {
+            present(disp, fb);
+            boolean fire = readJoyb(disp) != 0;
+            if (fire && !prevFire) break;                   // skip au clic
+            prevFire = fire;
+        }
+    }
 
     /** Présente une frame ET fait avancer le streaming de la musique MED (sans thread). */
     private static void present(Display disp, int fb) {

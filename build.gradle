@@ -363,15 +363,15 @@ tasks.register('displayTest', JavaExec) {
 // Distribution native autonome (jpackage)
 // ---------------------------------------------------------------------------
 // `gradle jpackage`          → build/jpackage/Gloom  : app-image (dossier exécutable,
-//                              JRE embarqué + assets bundlés, AUCUN outil externe requis).
+//                              JRE embarqué, AUCUN outil externe requis).
 // `gradle jpackageInstaller` → installeur natif (msi sous Windows [nécessite WiX], dmg/deb).
 //
-// Les assets GloomAmiga sont copiés dans l'app et l'exécutable est lancé avec
-// -Dgloom.assets=$APPDIR/assets (jeton résolu au lancement par le lanceur jpackage).
-// NB : seuls les sources .s/.bb2 de Gloom sont domaine public ; les assets ne sont PAS
-// redistribuables → cette distribution est pour un usage PERSONNEL.
+// IMPORTANT : les assets de Gloom ne sont PAS redistribuables (seuls les sources .s/.bb2 sont
+// domaine public). Le paquet n'embarque donc PAS les assets : il inclut un script
+// `fetch-assets.bat`/`.sh` que l'utilisateur final lance UNE fois pour les cloner depuis le
+// dépôt original (github.com/earok/GloomAmiga) dans $APPDIR/GloomAmiga. L'exécutable est lancé
+// avec -Dgloom.assets=$APPDIR/GloomAmiga (jeton résolu au runtime par le lanceur jpackage).
 // ===========================================================================
-def gloomAssets = file("${assetRoot}/../GloomAmiga")
 def jpackageInputDir = layout.buildDirectory.dir('jpackage-input')
 def jpackageOutDir = layout.buildDirectory.dir('jpackage')
 def isWindows = System.getProperty('os.name').toLowerCase().contains('win')
@@ -379,19 +379,15 @@ def isMac = System.getProperty('os.name').toLowerCase().contains('mac')
 def jpackageTool = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
         .get().metadata.installationPath.file('bin/jpackage' + (isWindows ? '.exe' : '')).asFile
 
-// Rassemble le jar applicatif + les dépendances (LWJGL + natives) + les assets.
+// Rassemble le jar applicatif + les dépendances (LWJGL + natives). Pas d'assets (cf. ci-dessus).
 tasks.register('jpackageStage', Copy) {
     group = 'distribution'
-    description = "Prépare l'entrée jpackage (jar + natives LWJGL + assets GloomAmiga)"
+    description = "Prépare l'entrée jpackage (jar + natives LWJGL)"
     dependsOn tasks.named('jar')
+    doFirst { delete jpackageInputDir.get().asFile }          // purge les fichiers obsolètes (ex. assets bundlés)
     into jpackageInputDir
     from(tasks.named('jar').flatMap { it.archiveFile })       // gloom.jar
     from(configurations.runtimeClasspath)                     // jars LWJGL + natives-*
-    into('assets') {                                          // → input/assets (= $APPDIR/assets)
-        from(gloomAssets) {
-            exclude '.git/**', 'prog/**', 'data/**', '**/*.bb2', '*.s', 's/**'
-        }
-    }
 }
 
 def jpackageArgs = { String type ->
@@ -403,13 +399,13 @@ def jpackageArgs = { String type ->
      '--main-jar', tasks.named('jar').get().archiveFileName.get(),
      '--main-class', 'gloom.host.Main',
      '--dest', jpackageOutDir.get().asFile.absolutePath,
-     '--java-options', '-Dgloom.assets=$APPDIR/assets',
+     '--java-options', '-Dgloom.assets=$APPDIR/GloomAmiga',
      '--java-options', '-Xmx512m']
 }
 
 tasks.register('jpackage', Exec) {
     group = 'distribution'
-    description = 'Crée une app native autonome (build/jpackage/Gloom) : JRE + assets embarqués'
+    description = 'Crée une app native autonome (build/jpackage/Gloom) : JRE embarqué + script fetch-assets'
     dependsOn tasks.named('jpackageStage')
     doFirst {
         delete jpackageOutDir.get().dir('Gloom').asFile       // jpackage refuse une cible existante
@@ -417,7 +413,16 @@ tasks.register('jpackage', Exec) {
         jpackageOutDir.get().asFile.mkdirs()
     }
     commandLine jpackageArgs('app-image')
-    doLast { println "App native créée : ${jpackageOutDir.get().asFile}\\Gloom" + (isWindows ? '\\Gloom.exe' : '') }
+    doLast {
+        // Scripts de récupération des assets à la racine du paquet (à côté de Gloom.exe).
+        copy {
+            from('dist') { include 'fetch-assets.bat', 'fetch-assets.sh' }
+            into jpackageOutDir.get().dir('Gloom')
+        }
+        def root = jpackageOutDir.get().dir('Gloom').asFile
+        println "App native créée : ${root}" + (isWindows ? '\\Gloom.exe' : '/bin/Gloom')
+        println "→ Lancez d'abord ${isWindows ? 'fetch-assets.bat' : 'fetch-assets.sh'} pour télécharger les assets."
+    }
 }
 
 tasks.register('jpackageInstaller', Exec) {
