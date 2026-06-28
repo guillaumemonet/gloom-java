@@ -91,7 +91,7 @@ public final class Rebirth extends SimpleApplication {
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
     private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
     private final Set<Integer> seeThroughTex = new HashSet<>();      // textures à colonnes ajourées (grilles/portes)
-    private static final float SPEED = Float.parseFloat(System.getProperty("speed", "2.0"));  // boost de vitesse (-Dspeed)
+    private static final float SPEED = Float.parseFloat(System.getProperty("speed", "1.5"));  // boost de vitesse (-Dspeed)
     private static final float TICK_DT = 1f / (60f * SPEED);       // cadence FIXE : logique 30*SPEED Hz (indépendante du fps)
     private float acc;                                             // accumulateur de temps pour le pas fixe
     private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)
@@ -107,6 +107,7 @@ public final class Rebirth extends SimpleApplication {
     private int frame;
     // souris (mouselook) : delta X accumulé en PIXELS, sensibilité en unités-rot/pixel (-Dmousesens)
     private float mouseDX;
+    private long glfwWindow;                                        // handle GLFW (pour verrouiller le curseur)
     private static final float MOUSE_SENS = Float.parseFloat(System.getProperty("mousesens", "0.18"));
     // état des contrôles (held)
     private boolean kFwd, kBack, kLeft, kRight, kStrafeL, kStrafeR, kFire;
@@ -187,13 +188,18 @@ public final class Rebirth extends SimpleApplication {
 
     /**
      * Verrouille le curseur dans la fenêtre (GLFW_CURSOR_DISABLED = caché + mode relatif illimité).
-     * setCursorVisible(false) ne fait que masquer → le curseur pouvait sortir et cliquer ailleurs.
+     * setCursorVisible(false) ne fait que masquer, et JME ré-applique SON mode après l'init → on force
+     * DISABLED à chaque frame (idempotent : seulement si l'état diffère). Re-grab aussi après alt-tab.
      * glfwGetCurrentContext() = la fenêtre JME (son contexte GL est courant sur ce thread de rendu).
      */
     private void grabCursor() {
-        long win = org.lwjgl.glfw.GLFW.glfwGetCurrentContext();
-        if (win != 0L) org.lwjgl.glfw.GLFW.glfwSetInputMode(win,
-                org.lwjgl.glfw.GLFW.GLFW_CURSOR, org.lwjgl.glfw.GLFW.GLFW_CURSOR_DISABLED);
+        if (glfwWindow == 0L) glfwWindow = org.lwjgl.glfw.GLFW.glfwGetCurrentContext();
+        if (glfwWindow != 0L
+                && org.lwjgl.glfw.GLFW.glfwGetInputMode(glfwWindow, org.lwjgl.glfw.GLFW.GLFW_CURSOR)
+                   != org.lwjgl.glfw.GLFW.GLFW_CURSOR_DISABLED) {
+            org.lwjgl.glfw.GLFW.glfwSetInputMode(glfwWindow,
+                    org.lwjgl.glfw.GLFW.GLFW_CURSOR, org.lwjgl.glfw.GLFW.GLFW_CURSOR_DISABLED);
+        }
     }
 
     private void initAudio() {
@@ -293,6 +299,7 @@ public final class Rebirth extends SimpleApplication {
     @Override
     public void simpleUpdate(float tpf) {
         frame++;
+        grabCursor();                                   // maintient le verrou souris (JME peut le relâcher)
         int joyy = kFwd ? -1 : (kBack ? 1 : 0);
         int joys = (kStrafeL || kStrafeR) ? -1 : 0;
         int joyx = joys != 0 ? (kStrafeL ? -1 : 1) : (kLeft ? -1 : (kRight ? 1 : 0));
@@ -712,9 +719,11 @@ public final class Rebirth extends SimpleApplication {
                 texLight.put(k, new float[]{br / (bright * 255f), bg / (bright * 255f), bb / (bright * 255f)});
             wallTexBase.put(k, base);                      // mémorise le pointeur pixels (détection d'animation)
             Texture2D proc = makeTex(buf, 64, 64);
-            // HD : indexé par la FRAME courante (slot d'anim), pas le numéro de zone — sinon une texture
-            // animée afficherait une seule frame HD figée. hdNumberFor() résout le pointeur courant → slot.
-            Texture2D hd = loadHd("hd/wall_" + hdNumberFor(k) + ".png");
+            // HD indexé par la FRAME courante (slot d'anim), pas le numéro de zone — sinon une texture
+            // animée afficherait une frame HD figée. hdNumberFor() résout le pointeur courant → slot.
+            // PAS de HD pour les murs AJOURÉS : un PNG est opaque → les trous (alpha) seraient perdus.
+            // (Pour du HD see-through il faudrait cuire le masque alpha dans le PNG — repoussé.)
+            Texture2D hd = holed ? null : loadHd("hd/wall_" + hdNumberFor(k) + ".png");
             return hd != null ? hd : proc;
         });
     }
