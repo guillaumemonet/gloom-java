@@ -101,7 +101,7 @@ public final class Rebirth extends SimpleApplication {
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
     private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
     private final Set<Integer> seeThroughTex = new HashSet<>();      // textures à colonnes ajourées (grilles/portes)
-    private static final float SPEED = Float.parseFloat(System.getProperty("speed", "1.5"));  // boost de vitesse (-Dspeed)
+    private static final float SPEED = Float.parseFloat(System.getProperty("speed", "1.25"));  // boost de vitesse (-Dspeed)
     private static final float TICK_DT = 1f / (60f * SPEED);       // cadence FIXE : logique 30*SPEED Hz (indépendante du fps)
     private float acc;                                             // accumulateur de temps pour le pas fixe
     private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)

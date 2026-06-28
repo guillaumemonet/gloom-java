@@ -33,6 +33,7 @@ public final class Main {
         AUDIO = audio;
         audio.playMusic(loadModule("sfxs/med1"));       // musique MED (jouée tout au long)
 
+        boolean handedOff = false;                      // true = on a passé la main au moteur 3D (JME)
         try {
             if (map != null) {
                 LevelScene scene = new LevelScene();    // mode « un seul niveau » (test/visite)
@@ -45,12 +46,53 @@ public final class Main {
                 }
             } else {
                 showLogo(disp, W, H);                   // logo Black Magic Software (cf. gloom.s:9394)
-                runFullGame(disp, W, H);                // menu → partie complète (script) → fin → menu
+                Choice choice = chooseEngine(disp, W, H);   // GLOOM CLASSIC (2D) / GLOOM REBIRTH (3D)
+                if (choice == Choice.REBIRTH) {
+                    // bascule vers le moteur 3D : on libère TOUT le 2D (OpenAL + GLFW) avant que JME
+                    // ne crée son propre contexte (il gère sa fenêtre, son audio et son menu de jeu).
+                    audio.shutdown(); AUDIO = null;
+                    disp.destroy();
+                    handedOff = true;
+                    gloom.rebirth.Rebirth.main(new String[0]);
+                } else if (choice == Choice.CLASSIC) {
+                    runFullGame(disp, W, H);            // menu → partie complète (script) → fin → menu
+                }
+                // EXIT : on tombe dans le finally
             }
         } finally {
-            audio.shutdown();
-            disp.destroy();
+            if (!handedOff) {
+                if (AUDIO != null) audio.shutdown();
+                disp.destroy();
+            }
         }
+    }
+
+    /** Choix du moteur au lancement (rendu dans le moteur 2D). */
+    private enum Choice { CLASSIC, REBIRTH, EXIT }
+
+    /** Écran-launcher : GLOOM CLASSIC (2D) / GLOOM REBIRTH (3D). Navigation ↑/↓ + feu. */
+    private static Choice chooseEngine(Display disp, int W, int H) {
+        String[] items = {"GLOOM CLASSIC", "GLOOM REBIRTH"};
+        int sel = 0;
+        boolean prevUp = false, prevDown = false, prevFire = true;   // ignore un feu déjà tenu (logo)
+        while (!disp.shouldClose() && !disp.key(GLFW_KEY_ESCAPE)) {
+            boolean up = keyUp(disp), down = keyDown(disp), fire = readJoyb(disp) != 0;
+            if (up && !prevUp) sel ^= 1;
+            if (down && !prevDown) sel ^= 1;
+            prevUp = up; prevDown = down;
+
+            int fb = Mem.l(Vars.cop);
+            for (int i = 0; i < W * H; i++) Mem.ww(fb + i * 2, 0);    // fond noir
+            Font.drawCenteredBig(fb, W, H, H / 2 - 52, "GLOOM", 0x96f);
+            Font.drawCenteredBig(fb, W, H, H / 2 - 14, items[0] + " (2D)", sel == 0 ? 0xfff : 0x70a);
+            Font.drawCenteredBig(fb, W, H, H / 2 + 8, items[1] + " (3D)", sel == 1 ? 0xfff : 0x70a);
+            Font.drawCentered(fb, W, H, H - 16, "UP/DOWN + FIRE", 0x0ff);
+            present(disp, fb);
+
+            if (fire && !prevFire) return sel == 0 ? Choice.CLASSIC : Choice.REBIRTH;
+            prevFire = fire;
+        }
+        return Choice.EXIT;
     }
 
     /** Partie complète : écran-titre/menu → jeu (script, écrans d'histoire, HUD) → fin → retour menu. */
