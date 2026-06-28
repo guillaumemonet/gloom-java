@@ -115,6 +115,7 @@ public final class Rebirth extends SimpleApplication {
     private int optRow, awaitRow, lastW, lastH;
     private boolean pOptU, pOptD, pOptL, pOptR, pOptF, kEsc, prevEsc;
     private ActionListener actionL;                               // listener des contrôles (ré-attaché après remap)
+    private long lastWallsHash, lastGoreHash;                     // évite de reconstruire murs/gore chaque frame (anti-GC)
     private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)
     private final Map<Integer, Integer> slotOfBase = new HashMap<>();    // pointeur pixels initial → slot (= frame d'anim) pour le HD
     private PointLight torch;                                        // lumière portée par le joueur
@@ -449,11 +450,13 @@ public final class Rebirth extends SimpleApplication {
             Mem.wl(Vars.memat, Mem.l(Vars.memory));
             Objects.calcscene(scene.player);            // vars caméra (sélection de frame 8-dir)
             updateCamera();
-            rebuildWalls();                             // portes/rotpolys/morphs : géométrie suit la simu
+            long wh = wallsHash();                      // ne reconstruit les murs que si la géométrie/anim change
+            if (wh != lastWallsHash) { lastWallsHash = wh; rebuildWalls(); }
             updateMuzzle();
             updateEnemies();
             updateBulletLights();                       // balles → lumières dynamiques (murs + ennemis)
-            renderGore();                               // décals de gore au sol (gibs retombés)
+            long gh = goreHash();                       // idem : décals de gore reconstruits sur changement
+            if (gh != lastGoreHash) { lastGoreHash = gh; renderGore(); }
             updateHud();
             updateDamageFx();                           // flash rouge (coups) + rouge mort
         } else {
@@ -469,9 +472,10 @@ public final class Rebirth extends SimpleApplication {
     private void renderAbout() {
         int fb = Mem.l(Vars.cop);
         for (int i = 0; i < FB_W * FB_H; i++) Mem.ww(fb + i * 2, 0);
-        gloom.host.Font.drawCenteredBig(fb, FB_W, FB_H, FB_H / 2 - 40, "GLOOM", 0xf00);
-        gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H / 2 - 4, "BLACK MAGIC SOFTWARE 1995", 0x0f0);
-        gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H / 2 + 8, "PORTAGE JAVA - REBIRTH 3D", 0x0ff);
+        gloom.host.Font.drawCenteredBig(fb, FB_W, FB_H, FB_H / 2 - 46, "GLOOM", 0xf00);
+        gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H / 2 - 14, "BLACK MAGIC SOFTWARE 1995", 0x0f0);
+        gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H / 2 - 2, "PORTAGE JAVA - REBIRTH 3D", 0x0ff);
+        gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H / 2 + 12, "PORTED BY GUILLAUME MONET", 0xfd9);
         gloom.host.Font.drawCenteredBig(fb, FB_W, FB_H, FB_H - 24, "PRESS FIRE", 0xff0);
     }
 
@@ -838,7 +842,8 @@ public final class Rebirth extends SimpleApplication {
                 minZ = Math.min(minZ, Math.min(w[1], w[3])); maxZ = Math.max(maxZ, Math.max(w[1], w[3]));
             }
         for (Integer t : byTex.keySet()) wallTexture(t);            // précharge (remplit seeThroughTex/texLight)
-        rebuildWalls();                                            // 1er build (puis chaque frame → portes animées)
+        rebuildWalls();                                            // 1er build (puis sur changement → portes animées)
+        lastWallsHash = wallsHash(); lastGoreHash = goreHash();    // évite un rebuild superflu à la 1re frame
 
         if (Mem.l(Vars.floor) != 0) { floorGeom = plane("floor", minX, maxX, minZ, maxZ, 0, tileTexture(Mem.l(Vars.floor), "floor")); rootNode.attachChild(floorGeom); }
         if (Mem.l(Vars.roof) != 0) { ceilGeom = plane("ceil", minX, maxX, minZ, maxZ, WALL_H, tileTexture(Mem.l(Vars.roof), "roof")); rootNode.attachChild(ceilGeom); }
@@ -886,7 +891,47 @@ public final class Rebirth extends SimpleApplication {
         return byTex;
     }
 
-    /** Reconstruit les meshes de murs depuis l'état COURANT des zones (appelé chaque frame). */
+    /**
+     * Empreinte LÉGÈRE (sans allocation) de la géométrie des murs : coords des zones + n° de texture
+     * + pointeur de frame (anim). Inchangée → pas besoin de reconstruire les meshes (anti-pic GC).
+     */
+    private long wallsHash() {
+        int grid = Mem.l(Vars.map_grid), ppnt = Mem.l(Vars.map_ppnt), poly = Mem.l(Vars.map_poly), tex = Vars.textures;
+        long h = 1469598103934665603L;
+        for (int cell = 0; cell < 32 * 32; cell++) {
+            int a0 = grid + cell * 8;
+            int num = Mem.w(a0);
+            if (num < 0) continue;
+            int pp = ppnt + Mem.uw(a0 + 2) * 2;
+            for (int i = 0; i <= num; i++) {
+                int zb = poly + Mem.uw(pp) * Defs.zo_size; pp += 2;
+                h = (h ^ Mem.uw(zb + Defs.zo_lx)) * 1099511628211L;
+                h = (h ^ Mem.uw(zb + Defs.zo_lz)) * 1099511628211L;
+                h = (h ^ Mem.uw(zb + Defs.zo_rx)) * 1099511628211L;
+                h = (h ^ Mem.uw(zb + Defs.zo_rz)) * 1099511628211L;
+                int t = Mem.ub(zb + Defs.zo_t);
+                h = (h ^ t) * 1099511628211L;
+                h = (h ^ Mem.l(tex + t * 4)) * 1099511628211L;     // pointeur frame → capte l'animation de texture
+            }
+        }
+        return h;
+    }
+
+    /** Empreinte de la liste des décals de gore (change quand un gib retombe / est recyclé). */
+    private long goreHash() {
+        long h = 1469598103934665603L;
+        int g = Vars.gore;
+        while (true) {
+            g = Mem.l(g);
+            if (Mem.l(g) == 0) break;
+            h = (h ^ Mem.w(g + Defs.go_x)) * 1099511628211L;
+            h = (h ^ Mem.w(g + Defs.go_z)) * 1099511628211L;
+            h = (h ^ Mem.l(g + Defs.go_shape)) * 1099511628211L;
+        }
+        return h;
+    }
+
+    /** Reconstruit les meshes de murs depuis l'état COURANT des zones (sur changement seulement). */
     private void rebuildWalls() {
         walls.detachAllChildren();
         Map<Integer, List<float[]>> byTex = collectWalls();
