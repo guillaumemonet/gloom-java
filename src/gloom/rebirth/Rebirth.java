@@ -1,6 +1,8 @@
 package gloom.rebirth;
 
 import com.jme3.app.SimpleApplication;
+import com.jme3.font.BitmapFont;
+import com.jme3.font.BitmapText;
 import com.jme3.input.KeyInput;
 import com.jme3.input.controls.ActionListener;
 import com.jme3.input.controls.KeyTrigger;
@@ -11,8 +13,14 @@ import com.jme3.material.RenderState;
 import com.jme3.math.ColorRGBA;
 import com.jme3.math.FastMath;
 import com.jme3.math.Vector3f;
+import com.jme3.post.FilterPostProcessor;
 import com.jme3.post.SceneProcessor;
+import com.jme3.post.filters.FogFilter;
 import com.jme3.profile.AppProfiler;
+import com.jme3.renderer.queue.RenderQueue.ShadowMode;
+import com.jme3.scene.Spatial;
+import com.jme3.scene.shape.Quad;
+import com.jme3.shadow.DirectionalLightShadowRenderer;
 import com.jme3.renderer.RenderManager;
 import com.jme3.renderer.ViewPort;
 import com.jme3.renderer.queue.RenderQueue;
@@ -71,6 +79,9 @@ public final class Rebirth extends SimpleApplication {
     private int frame;
     // état des contrôles (held)
     private boolean kFwd, kBack, kLeft, kRight, kStrafeL, kStrafeR, kFire;
+    // HUD
+    private Geometry hpBar;
+    private BitmapText hudText;
 
     public static void main(String[] args) {
         Rebirth app = new Rebirth();
@@ -86,22 +97,72 @@ public final class Rebirth extends SimpleApplication {
     @Override
     public void simpleInitApp() {
         flyCam.setEnabled(false);                      // caméra pilotée par la simulation
+        setDisplayStatView(false);                     // pas de stats/FPS de debug JME
+        setDisplayFps(false);
 
         scene = new LevelScene();
         scene.init(320, 240, MAP, TILE);
+        Mem.ww(scene.player + Defs.ob_lives, 5);        // vies de départ (init standalone)
         buildLevel();
         rootNode.attachChild(enemies);
+        enemies.setShadowMode(ShadowMode.Off);         // pas d'ombre carrée depuis les quads sprites
 
         DirectionalLight sun = new DirectionalLight(new Vector3f(-0.4f, -0.9f, -0.3f).normalizeLocal(),
-                ColorRGBA.White.mult(0.9f));
+                ColorRGBA.White.mult(0.85f));
         rootNode.addLight(sun);
-        rootNode.addLight(new AmbientLight(ColorRGBA.White.mult(0.5f)));
+        rootNode.addLight(new AmbientLight(ColorRGBA.White.mult(0.45f)));
         viewPort.setBackgroundColor(new ColorRGBA(0.02f, 0.02f, 0.04f, 1f));
         cam.setFrustumFar(6000f);
 
+        setupPostFx(sun);
+        setupHud();
         bindKeys();
         if (HEADLESS) { spawnDemoEnemy(); attachScreenshot(); }
         updateCamera();
+    }
+
+    /** Brouillard d'ambiance (« Gloom » !) + ombres directionnelles. */
+    private void setupPostFx(DirectionalLight sun) {
+        rootNode.setShadowMode(ShadowMode.CastAndReceive);
+        DirectionalLightShadowRenderer dlsr = new DirectionalLightShadowRenderer(assetManager, 1024, 2);
+        dlsr.setLight(sun);
+        dlsr.setShadowIntensity(0.4f);
+        viewPort.addProcessor(dlsr);
+
+        FilterPostProcessor fpp = new FilterPostProcessor(assetManager);
+        FogFilter fog = new FogFilter(new ColorRGBA(0.03f, 0.03f, 0.06f, 1f), 1.2f, 55f);
+        fpp.addFilter(fog);
+        viewPort.addProcessor(fpp);
+    }
+
+    /** HUD overlay (guiNode) : barre de vie + texte PV/vies/arme. */
+    private void setupHud() {
+        hpBar = new Geometry("hp", new Quad(1, 1));
+        Material m = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        m.setColor("Color", ColorRGBA.Green);
+        hpBar.setMaterial(m);
+        guiNode.attachChild(hpBar);
+
+        BitmapFont font = assetManager.loadFont("Interface/Fonts/Default.fnt");
+        hudText = new BitmapText(font);
+        hudText.setSize(font.getCharSet().getRenderedSize());
+        hudText.setColor(new ColorRGBA(0.85f, 0.55f, 1f, 1f));   // violet, comme Gloom
+        guiNode.attachChild(hudText);
+        updateHud();
+    }
+
+    private void updateHud() {
+        int p = scene.player;
+        int hp = Math.max(0, Mem.w(p + Defs.ob_hitpoints));
+        int lives = Mem.w(p + Defs.ob_lives);
+        int weapon = Mem.w(p + Defs.ob_weapon) + 1;
+        float h = settings.getHeight();
+        hpBar.setLocalScale(Math.min(25, hp) * 8f, 14f, 1f);     // barre 0..200 px
+        hpBar.setLocalTranslation(14, h - 30, 0);
+        ((Material) hpBar.getMaterial()).setColor("Color",
+                hp <= 5 ? ColorRGBA.Red : hp <= 12 ? ColorRGBA.Orange : ColorRGBA.Green);
+        hudText.setText("HP " + hp + "    LIVES " + lives + "    WEAPON " + weapon);
+        hudText.setLocalTranslation(14, h - 36, 0);
     }
 
     @Override
@@ -117,6 +178,7 @@ public final class Rebirth extends SimpleApplication {
         Objects.calcscene(scene.player);
         updateCamera();
         updateEnemies();
+        updateHud();
     }
 
     private void updateCamera() {
@@ -381,7 +443,7 @@ public final class Rebirth extends SimpleApplication {
     }
 
     private void attachScreenshot() {
-        viewPort.addProcessor(new SceneProcessor() {
+        guiViewPort.addProcessor(new SceneProcessor() {     // après la passe GUI → capture HUD inclus
             private RenderManager rm; private boolean done;
             @Override public void initialize(RenderManager rm, ViewPort vp) { this.rm = rm; }
             @Override public void reshape(ViewPort vp, int w, int h) { }
