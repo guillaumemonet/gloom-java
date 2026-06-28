@@ -79,6 +79,7 @@ public final class Rebirth extends SimpleApplication {
 
     private static final float S = 1f / 64f;          // échelle gloom → JME
     private static final float WALL_H = 256f * S;
+    private static final float DOOR_OFFSET = 4f;      // décalage (unités gloom) des murs de portes, anti z-fighting
     private static final boolean HEADLESS = System.getProperty("shot") != null;
     private static final String MAP = System.getProperty("map", "map1_3");
     private static final String TILE = System.getProperty("tile", "1");
@@ -88,6 +89,7 @@ public final class Rebirth extends SimpleApplication {
     private Game game;                                               // séquenceur (script → histoire + niveaux)
     private Geometry floorGeom, ceilGeom;                            // sol/plafond du niveau (détachés au changement)
     private final List<PointLight> levelLights = new ArrayList<>();  // point lights émissives du niveau courant
+    private final Set<Integer> doorZones = new HashSet<>();          // zones-portes (mobiles) → léger décalage anti z-fighting
     private Geometry storyQuad;                                      // overlay plein écran : framebuffer 2D
     private Image storyImg;                                          // image dynamique de l'overlay
     private ByteBuffer storyBuf;                                     // pixels RGBA de l'overlay
@@ -828,6 +830,9 @@ public final class Rebirth extends SimpleApplication {
     private void loadLevelGeometry() {
         hdEpisode = episodeOf(game.currentMap);                    // dossier HD : hd/<épisode>/ (ex. map1)
         playerBaseMovspeed = Mem.w(scene.player + Defs.ob_movspeed);   // vitesse fidèle (joueur fraîchement spawné)
+        // zones-portes (do_poly = adresse de zone) : leurs murs seront légèrement décalés (anti z-fighting).
+        doorZones.clear();
+        for (int d = Mem.l(Vars.doors); Mem.l(d) != 0; d = Mem.l(d)) doorZones.add(Mem.l(d + Defs.do_poly));
         // --- purge du niveau précédent ---
         walls.detachAllChildren();
         enemies.detachAllChildren();
@@ -894,6 +899,11 @@ public final class Rebirth extends SimpleApplication {
             int zb = poly + z * Defs.zo_size;
             float lx = (short) Mem.w(zb + Defs.zo_lx), lz = (short) Mem.w(zb + Defs.zo_lz);
             float rx = (short) Mem.w(zb + Defs.zo_rx), rz = (short) Mem.w(zb + Defs.zo_rz);
+            if (doorZones.contains(zb)) {              // mur de porte : décalé le long de sa normale (anti z-fighting)
+                float dx = rx - lx, dz = rz - lz, len = (float) Math.sqrt(dx * dx + dz * dz) + 1e-6f;
+                float ox = -dz / len * DOOR_OFFSET, oz = dx / len * DOOR_OFFSET;
+                lx += ox; lz += oz; rx += ox; rz += oz;
+            }
             byTex.computeIfAbsent(Mem.ub(zb + Defs.zo_t), k -> new ArrayList<>()).add(new float[]{lx, lz, rx, rz});
         }
         return byTex;
