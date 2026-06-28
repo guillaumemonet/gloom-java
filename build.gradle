@@ -81,7 +81,7 @@ tasks.register('rebirth', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'gloom.rebirth.Rebirth'
     workingDir = assetRoot
-    systemProperties System.getProperties().subMap(['shot', 'map', 'tile', 'speed'])
+    systemProperties System.getProperties().subMap(['shot', 'map', 'tile', 'speed', 'mousesens'])
 }
 
 // Lance la VARIANTE gloom2.s (planaire/AGA : focshft 7 + castrots128). Même jeu, projection

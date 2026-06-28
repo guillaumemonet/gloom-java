@@ -1,11 +1,15 @@
 package gloom.rebirth;
 
 import com.jme3.app.SimpleApplication;
+import com.jme3.asset.plugins.FileLocator;
 import com.jme3.font.BitmapFont;
 import com.jme3.font.BitmapText;
 import com.jme3.input.KeyInput;
+import com.jme3.input.MouseInput;
+import com.jme3.input.RawInputListener;
 import com.jme3.input.controls.ActionListener;
 import com.jme3.input.controls.KeyTrigger;
+import com.jme3.input.controls.MouseButtonTrigger;
 import com.jme3.light.AmbientLight;
 import com.jme3.light.DirectionalLight;
 import com.jme3.light.PointLight;
@@ -17,6 +21,7 @@ import com.jme3.math.FastMath;
 import com.jme3.math.Vector3f;
 import com.jme3.post.FilterPostProcessor;
 import com.jme3.post.SceneProcessor;
+import com.jme3.post.filters.BloomFilter;
 import com.jme3.post.filters.FogFilter;
 import com.jme3.profile.AppProfiler;
 import com.jme3.renderer.queue.RenderQueue.ShadowMode;
@@ -99,6 +104,9 @@ public final class Rebirth extends SimpleApplication {
     private final List<Geometry> spritePool = new ArrayList<>();     // billboards réutilisés (pas de GC/frame)
     private Mesh unitQuad;                                           // quad unité partagé (mis à l'échelle)
     private int frame;
+    // souris (mouselook) : delta X accumulé en PIXELS, sensibilité en unités-rot/pixel (-Dmousesens)
+    private float mouseDX;
+    private static final float MOUSE_SENS = Float.parseFloat(System.getProperty("mousesens", "0.18"));
     // état des contrôles (held)
     private boolean kFwd, kBack, kLeft, kRight, kStrafeL, kStrafeR, kFire;
     // HUD
@@ -126,6 +134,9 @@ public final class Rebirth extends SimpleApplication {
         flyCam.setEnabled(false);                      // caméra pilotée par la simulation
         setDisplayStatView(false);                     // pas de stats de debug JME
         setDisplayFps(true);                           // compteur FPS (diagnostic de fluidité)
+        inputManager.setCursorVisible(false);          // souris capturée (mouselook FPS)
+        // textures HD optionnelles : PNG dans <cwd>/hd/ (cwd = dépôt assets). Repli sur le procédural.
+        assetManager.registerLocator(".", FileLocator.class);
 
         scene = new LevelScene();
         scene.init(320, 240, MAP, TILE);
@@ -206,6 +217,11 @@ public final class Rebirth extends SimpleApplication {
         // brouillard SUBTIL (profondeur d'ambiance) : densité 1.2 faisait un « filtre » devant le joueur.
         FogFilter fog = new FogFilter(new ColorRGBA(0.03f, 0.03f, 0.06f, 1f), 0.5f, 120f);
         fpp.addFilter(fog);
+        // bloom : les zones brillantes (balles, panneaux émissifs, halos) « débordent » → look moderne.
+        BloomFilter bloom = new BloomFilter(BloomFilter.GlowMode.Scene);
+        bloom.setBloomIntensity(1.3f);
+        bloom.setExposurePower(2.2f);
+        fpp.addFilter(bloom);
         viewPort.addProcessor(fpp);
     }
 
@@ -273,6 +289,12 @@ public final class Rebirth extends SimpleApplication {
         acc += Math.min(tpf, 0.25f);                    // cap anti-spirale de la mort
         int steps = 0;
         while (acc >= TICK_DT && steps < 6) { scene.tick(); acc -= TICK_DT; steps++; }
+        // MOUSELOOK : souris droite (DX>0) → ob_rot augmente → vue tourne à droite (cf. rotplayer).
+        if (mouseDX != 0f) {
+            int d16 = (int) (mouseDX * MOUSE_SENS * 65536f);   // unités-rot 16.16 (256 = tour complet)
+            Mem.wl(scene.player + Defs.ob_rot, Mem.l(scene.player + Defs.ob_rot) + d16);
+            mouseDX = 0f;
+        }
         // cam vars de la simu (pour la sélection de frame 8-directions) + caméra 3D
         Mem.wl(Vars.memat, Mem.l(Vars.memory));
         Objects.calcscene(scene.player);
@@ -512,8 +534,8 @@ public final class Rebirth extends SimpleApplication {
         rootNode.attachChild(walls);
         rebuildWalls();                                            // 1er build (puis chaque frame → portes animées)
 
-        if (Mem.l(Vars.floor) != 0) rootNode.attachChild(plane("floor", minX, maxX, minZ, maxZ, 0, tileTexture(Mem.l(Vars.floor))));
-        if (Mem.l(Vars.roof) != 0) rootNode.attachChild(plane("ceil", minX, maxX, minZ, maxZ, WALL_H, tileTexture(Mem.l(Vars.roof))));
+        if (Mem.l(Vars.floor) != 0) rootNode.attachChild(plane("floor", minX, maxX, minZ, maxZ, 0, tileTexture(Mem.l(Vars.floor), "floor")));
+        if (Mem.l(Vars.roof) != 0) rootNode.attachChild(plane("ceil", minX, maxX, minZ, maxZ, WALL_H, tileTexture(Mem.l(Vars.roof), "roof")));
 
         // point lights sur les murs à texture ÉMISSIVE (panneaux/écrans lumineux) — texLight rempli
         // pendant wallTexture(). Dédoublonnage par cellule de grille + plafonné (perf single-pass).
@@ -675,11 +697,30 @@ public final class Rebirth extends SimpleApplication {
             if (bright > 64 * 64 * 0.045f)                 // >4,5% de pixels brillants → texture émissive
                 texLight.put(k, new float[]{br / (bright * 255f), bg / (bright * 255f), bb / (bright * 255f)});
             wallTexBase.put(k, base);                      // mémorise le pointeur pixels (détection d'animation)
-            return makeTex(buf, 64, 64);
+            Texture2D proc = makeTex(buf, 64, 64);
+            Texture2D hd = loadHd("hd/wall_" + k + ".png");   // PNG HD optionnel → sinon procédural
+            return hd != null ? hd : proc;
         });
     }
 
-    private Texture2D tileTexture(int base) {
+    /** Charge une texture HD optionnelle depuis &lt;cwd&gt;/hd/ ; null si absente (→ repli procédural). */
+    private Texture2D loadHd(String path) {
+        if (!new java.io.File(path).isFile()) return null;     // pas d'asset → repli (sans spam de log)
+        try {
+            Texture t = assetManager.loadTexture(path);
+            t.setWrap(Texture.WrapMode.Repeat);
+            t.setMagFilter(Texture.MagFilter.Bilinear);
+            t.setMinFilter(Texture.MinFilter.Trilinear);       // mipmaps : HD net de loin
+            return (Texture2D) t;
+        } catch (Exception e) {
+            System.err.println("[Rebirth] texture HD illisible : " + path + " (" + e + ")");
+            return null;
+        }
+    }
+
+    private Texture2D tileTexture(int base, String hdName) {
+        Texture2D hd = loadHd("hd/" + hdName + ".png");        // hd/floor.png / hd/roof.png optionnels
+        if (hd != null) return hd;
         int rgbs = Mem.l(Vars.map_rgbs);
         ByteBuffer buf = BufferUtils.createByteBuffer(128 * 128 * 4);
         for (int x = 0; x < 128; x++)
@@ -718,7 +759,9 @@ public final class Rebirth extends SimpleApplication {
         inputManager.addMapping("right", new KeyTrigger(KeyInput.KEY_RIGHT));
         inputManager.addMapping("sl", new KeyTrigger(KeyInput.KEY_A));
         inputManager.addMapping("sr", new KeyTrigger(KeyInput.KEY_D));
-        inputManager.addMapping("fire", new KeyTrigger(KeyInput.KEY_LCONTROL), new KeyTrigger(KeyInput.KEY_SPACE));
+        // tir : Ctrl / Espace / CLIC GAUCHE souris
+        inputManager.addMapping("fire", new KeyTrigger(KeyInput.KEY_LCONTROL), new KeyTrigger(KeyInput.KEY_SPACE),
+                new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
         ActionListener al = (name, pressed, tpf) -> {
             switch (name) {
                 case "fwd" -> kFwd = pressed;   case "back" -> kBack = pressed;
@@ -728,6 +771,18 @@ public final class Rebirth extends SimpleApplication {
             }
         };
         inputManager.addListener(al, "fwd", "back", "left", "right", "sl", "sr", "fire");
+
+        // MOUSELOOK : delta X de la souris en PIXELS → rotation du joueur (appliqué dans simpleUpdate).
+        inputManager.addRawInputListener(new RawInputListener() {
+            @Override public void onMouseMotionEvent(com.jme3.input.event.MouseMotionEvent e) { mouseDX += e.getDX(); }
+            @Override public void beginInput() { }
+            @Override public void endInput() { }
+            @Override public void onJoyAxisEvent(com.jme3.input.event.JoyAxisEvent e) { }
+            @Override public void onJoyButtonEvent(com.jme3.input.event.JoyButtonEvent e) { }
+            @Override public void onMouseButtonEvent(com.jme3.input.event.MouseButtonEvent e) { }
+            @Override public void onKeyEvent(com.jme3.input.event.KeyInputEvent e) { }
+            @Override public void onTouchEvent(com.jme3.input.event.TouchEvent e) { }
+        });
     }
 
     /** Spawne un ennemi (marine) devant le joueur — pour vérifier les billboards en mode -Dshot. */
