@@ -81,6 +81,9 @@ public final class Rebirth extends SimpleApplication {
     private final Map<Integer, Texture2D> wallTexCache = new HashMap<>();
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
     private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
+    private final Set<Integer> seeThroughTex = new HashSet<>();      // textures à colonnes ajourées (grilles/portes)
+    private static final float TICK_DT = 1f / 60f;                  // simu à cadence FIXE (indépendante du fps)
+    private float acc;                                              // accumulateur de temps pour le pas fixe
     private PointLight torch;                                        // lumière portée par le joueur
     private PointLight muzzle;                                       // flash de bouche (tir)
     private float flash;                                             // intensité du flash (décroît)
@@ -221,7 +224,11 @@ public final class Rebirth extends SimpleApplication {
         int joys = (kStrafeL || kStrafeR) ? -1 : 0;
         int joyx = joys != 0 ? (kStrafeL ? -1 : 1) : (kLeft ? -1 : (kRight ? 1 : 0));
         scene.setInput(joyx, joyy, kFire ? -1 : 0, joys);
-        scene.tick();
+        // pas de temps FIXE : tick() à 60 Hz quel que soit le framerate de rendu (la logique tourne
+        // 1 frame sur 2 = 30 Hz comme l'original). Sinon une chute de fps en 3D ralentit le jeu.
+        acc += Math.min(tpf, 0.25f);                    // cap anti-spirale de la mort
+        int steps = 0;
+        while (acc >= TICK_DT && steps < 4) { scene.tick(); acc -= TICK_DT; steps++; }
         // cam vars de la simu (pour la sélection de frame 8-directions) + caméra 3D
         Mem.wl(Vars.memat, Mem.l(Vars.memory));
         Objects.calcscene(scene.player);
@@ -243,13 +250,15 @@ public final class Rebirth extends SimpleApplication {
 
     private void updateCamera() {
         int p = scene.player;
-        float px = (Mem.l(p + Defs.ob_x) >> 16) * S;
+        // X MIROIR (-) : le repère gloom est gaucher ; sans ce miroir le sens de rotation gauche/droite
+        // est inversé à l'écran. On miroir X partout (géométrie, lumières, sprites) → cohérent.
+        float px = -(Mem.l(p + Defs.ob_x) >> 16) * S;
         float pz = (Mem.l(p + Defs.ob_z) >> 16) * S;
         float eye = 110f * S;
         cam.setLocation(new Vector3f(px, eye, pz));
         if (torch != null) torch.setPosition(new Vector3f(px, eye, pz));   // la torche suit le joueur
         float theta = ((Mem.l(p + Defs.ob_rot) >> 16) & 0xff) * FastMath.TWO_PI / 256f;
-        cam.lookAt(new Vector3f(px + FastMath.sin(theta), eye, pz + FastMath.cos(theta)), Vector3f.UNIT_Y);
+        cam.lookAt(new Vector3f(px - FastMath.sin(theta), eye, pz + FastMath.cos(theta)), Vector3f.UNIT_Y);
     }
 
     // ----------------------------------------------------------------- ennemis (billboards)
@@ -285,7 +294,7 @@ public final class Rebirth extends SimpleApplication {
         Geometry g = spriteSlot(slot);
         g.getMaterial().setTexture("ColorMap", tex);
         g.setLocalScale(wW, wH, 1f);                   // quad unité mis à l'échelle (pas de Mesh recréé)
-        g.setLocalTranslation(ox * S, centerY, oz * S);
+        g.setLocalTranslation(-ox * S, centerY, oz * S);   // X miroir
         g.setCullHint(Spatial.CullHint.Inherit);
         return true;
     }
@@ -376,8 +385,14 @@ public final class Rebirth extends SimpleApplication {
             minZ = Math.min(minZ, Math.min(lz, rz)); maxZ = Math.max(maxZ, Math.max(lz, rz));
         }
         for (var e : byTex.entrySet()) {
+            Texture2D tex = wallTexture(e.getKey());       // (remplit seeThroughTex / texLight au passage)
             Geometry wg = new Geometry("walls_" + e.getKey(), wallMesh(e.getValue()));
-            wg.setMaterial(litTextured(wallTexture(e.getKey()), true));
+            Material m = litTextured(tex, true);
+            if (seeThroughTex.contains(e.getKey())) {       // grille/porte ajourée : alpha discard + pas d'ombre pleine
+                m.setFloat("AlphaDiscardThreshold", 0.5f);
+                wg.setShadowMode(ShadowMode.Receive);
+            }
+            wg.setMaterial(m);
             rootNode.attachChild(wg);
         }
         if (Mem.l(Vars.floor) != 0) rootNode.attachChild(plane("floor", minX, maxX, minZ, maxZ, 0, tileTexture(Mem.l(Vars.floor))));
@@ -395,7 +410,7 @@ public final class Rebirth extends SimpleApplication {
                 float cx = (w[0] + w[2]) / 2, cz = (w[1] + w[3]) / 2;
                 long cell = ((long) Math.round(cx / 384) << 20) ^ Math.round(cz / 384);
                 if (!usedCells.add(cell)) continue;    // déjà une lumière dans cette zone
-                PointLight pl = new PointLight(new Vector3f(cx * S, WALL_H * 0.45f, cz * S),
+                PointLight pl = new PointLight(new Vector3f(-cx * S, WALL_H * 0.45f, cz * S),   // X miroir
                         new ColorRGBA(col[0], col[1], col[2], 1f).mult(2.2f), 520f * S);
                 rootNode.addLight(pl);
                 added++;
@@ -409,7 +424,7 @@ public final class Rebirth extends SimpleApplication {
         int[] idx = new int[n * 6];
         for (int i = 0; i < n; i++) {
             float[] w = walls.get(i);
-            float lx = w[0] * S, lz = w[1] * S, rx = w[2] * S, rz = w[3] * S;
+            float lx = -w[0] * S, lz = w[1] * S, rx = -w[2] * S, rz = w[3] * S;   // X miroir
             float dx = rx - lx, dz = rz - lz, len = (float) Math.sqrt(dx * dx + dz * dz) + 1e-6f;
             float nx = -dz / len, nz = dx / len, tile = len / WALL_H;
             int v = i * 4;
@@ -432,7 +447,7 @@ public final class Rebirth extends SimpleApplication {
     private static void putv(float[] a, int v, float x, float y, float z) { a[v * 3] = x; a[v * 3 + 1] = y; a[v * 3 + 2] = z; }
 
     private Geometry plane(String name, float minX, float maxX, float minZ, float maxZ, float gy, Texture2D tex) {
-        float x0 = minX * S, x1 = maxX * S, z0 = minZ * S, z1 = maxZ * S;
+        float x0 = -minX * S, x1 = -maxX * S, z0 = minZ * S, z1 = maxZ * S;   // X miroir
         float u0 = minX / 128f, u1 = maxX / 128f, v0 = minZ / 128f, v1 = maxZ / 128f;
         float[] pos = { x0, gy, z0, x1, gy, z0, x1, gy, z1, x0, gy, z1 };
         float[] nor = { 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0 };
@@ -461,16 +476,25 @@ public final class Rebirth extends SimpleApplication {
             int base = Mem.l(Vars.textures + k * 4), rgbs = Mem.l(Vars.map_rgbs);
             ByteBuffer buf = BufferUtils.createByteBuffer(64 * 64 * 4);
             long br = 0, bg = 0, bb = 0; int bright = 0;   // stats des pixels lumineux (→ émissivité)
+            boolean holed = false;                          // au moins une colonne ajourée → texture see-through
             for (int col = 0; col < 64; col++) {
+                // octet d'en-tête de colonne (cf. Render.fillColumn) : !=0 → colonne ajourée,
+                // ses texels d'index 0 sont des TROUS (le moteur 2D les rend transparents).
+                int hdr = base == 0 ? 0 : Mem.ub(base + col * 65);
+                boolean colHoled = hdr != 0;
+                if (colHoled) holed = true;
                 int cb = base + col * 65 + 1;
                 for (int row = 0; row < 64; row++) {
-                    int rgb = base == 0 ? 0x808080 : colorOf(rgbs, Mem.ub(cb + row));
+                    int ti = base == 0 ? 1 : Mem.ub(cb + row);
+                    int p = ((63 - row) * 64 + col) * 4;
+                    if (colHoled && ti == 0) { buf.put(p + 3, (byte) 0); continue; }   // trou → transparent
+                    int rgb = base == 0 ? 0x808080 : colorOf(rgbs, ti);
                     int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
                     if (0.30f * r + 0.59f * g + 0.11f * b > 165) { br += r; bg += g; bb += b; bright++; }
-                    int p = ((63 - row) * 64 + col) * 4;
                     buf.put(p, (byte) r).put(p + 1, (byte) g).put(p + 2, (byte) b).put(p + 3, (byte) 0xff);
                 }
             }
+            if (holed) seeThroughTex.add(k);
             if (bright > 64 * 64 * 0.045f)                 // >4,5% de pixels brillants → texture émissive
                 texLight.put(k, new float[]{br / (bright * 255f), bg / (bright * 255f), bb / (bright * 255f)});
             return makeTex(buf, 64, 64);

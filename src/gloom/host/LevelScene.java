@@ -91,6 +91,13 @@ public final class LevelScene {
 
         player = Mem.l(ObjInfo.player1);
         if (player == 0) player = makeFallbackPlayer();   // map sans joueur : caméra de secours
+
+        // point de réapparition (respawn) — en mode autonome (run -Dmap / rebirth) c'est ici qu'il
+        // faut l'armer ; sinon waitrestart relit p1x/p1z/p1r = 0 → on réapparaît à l'origine (0,0).
+        // (En partie complète, Game.loadLevel les repose à l'identique depuis le joueur spawné.)
+        Mem.ww(Vars.p1x, Mem.w(player + Defs.ob_x));
+        Mem.ww(Vars.p1z, Mem.w(player + Defs.ob_z));
+        Mem.ww(Vars.p1r, Mem.w(player + Defs.ob_rot));
     }
 
     /**
