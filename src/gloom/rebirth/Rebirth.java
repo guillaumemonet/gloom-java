@@ -106,9 +106,15 @@ public final class Rebirth extends SimpleApplication {
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
     private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
     private final Set<Integer> seeThroughTex = new HashSet<>();      // textures à colonnes ajourées (grilles/portes)
-    private static final float SPEED = Float.parseFloat(System.getProperty("speed", "1.25"));  // boost de vitesse (-Dspeed)
+    private static final float SPEED = Float.parseFloat(System.getProperty("speed", "1.0"));   // cadence SIMU (1.0=fidèle, tout le jeu)
     private static final float TICK_DT = 1f / (60f * SPEED);       // cadence FIXE : logique 30*SPEED Hz (indépendante du fps)
     private float acc;                                             // accumulateur de temps pour le pas fixe
+    // boost de DÉPLACEMENT du JOUEUR uniquement (monstres/balles inchangés) : multiplie ob_movspeed.
+    private static final float PLAYER_SPEED = Float.parseFloat(System.getProperty("playerspeed", "1.5"));
+    private int playerBaseMovspeed = 13;                          // ob_movspeed (mot fort) par défaut du joueur (player1=0xd0000)
+    // FOV vertical. Le 2D (focshft 6, 320×240) projette en ~124° (2·atan(120/64)) = fish-eye EXTRÊME et
+    // coûteux en 3D GPU. Défaut 100° = large « façon Gloom » mais utilisable ; -Dfov=124 pour le match exact.
+    private static final float FOV = Float.parseFloat(System.getProperty("fov", "100"));
     private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)
     private final Map<Integer, Integer> slotOfBase = new HashMap<>();    // pointeur pixels initial → slot (= frame d'anim) pour le HD
     private PointLight torch;                                        // lumière portée par le joueur
@@ -168,10 +174,9 @@ public final class Rebirth extends SimpleApplication {
         rootNode.addLight(sun);
         rootNode.addLight(new AmbientLight(ColorRGBA.White.mult(0.22f)));
         viewPort.setBackgroundColor(new ColorRGBA(0.02f, 0.02f, 0.04f, 1f));
-        // FOV LARGE (~70° vertical) : Gloom a un champ de vision large (fish-eye) ; un FOV étroit
-        // fait paraître le déplacement lent. Plan near PROCHE (0.05) : sinon en s'approchant d'un mur
-        // le polygone croise le plan near et se fait clipper (le mur « disparaît » de près).
-        cam.setFrustumPerspective(70f, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f);
+        // FOV = celui du moteur 2D (focshft 6 → fish-eye large, ~124° vertical) ; réglable -Dfov.
+        // Plan near PROCHE (0.05) : sinon en s'approchant d'un mur le polygone croise le near et se clippe.
+        cam.setFrustumPerspective(FOV, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f);
 
         // single-pass : permet plusieurs point lights en une passe (perf)
         renderManager.setPreferredLightMode(TechniqueDef.LightMode.SinglePass);
@@ -404,6 +409,9 @@ public final class Rebirth extends SimpleApplication {
         playing = game.phase == Game.Phase.PLAYING && game.scene != null;
         if (playing) {
             scene = game.scene;
+            // DÉPLACEMENT JOUEUR plus rapide (seulement lui) : ré-imposé chaque frame (le respawn restaure
+            // la valeur d'objinfo). La simu (monstres/balles) reste à vitesse fidèle (SPEED=1.0).
+            Mem.ww(scene.player + Defs.ob_movspeed, Math.round(playerBaseMovspeed * PLAYER_SPEED));
             // MOUSELOOK : souris droite (DX>0) → ob_rot augmente → vue tourne à droite (cf. rotplayer).
             if (mouseDX != 0f) {
                 Mem.wl(scene.player + Defs.ob_rot, Mem.l(scene.player + Defs.ob_rot)
@@ -686,6 +694,7 @@ public final class Rebirth extends SimpleApplication {
      */
     private void loadLevelGeometry() {
         hdEpisode = episodeOf(game.currentMap);                    // dossier HD : hd/<épisode>/ (ex. map1)
+        playerBaseMovspeed = Mem.w(scene.player + Defs.ob_movspeed);   // vitesse fidèle (joueur fraîchement spawné)
         // --- purge du niveau précédent ---
         walls.detachAllChildren();
         enemies.detachAllChildren();
