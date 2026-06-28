@@ -78,6 +78,7 @@ public final class Rebirth extends SimpleApplication {
 
     private LevelScene scene;
     private final Node enemies = new Node("enemies");
+    private final Node goreNode = new Node("gore");                  // décals de gore au sol (liste Vars.gore)
     private final Node walls = new Node("walls");                    // murs reconstruits chaque frame (portes animées)
     private final Map<Integer, Material> wallMatCache = new HashMap<>();
     private final Map<Integer, Texture2D> wallTexCache = new HashMap<>();
@@ -124,7 +125,9 @@ public final class Rebirth extends SimpleApplication {
         Mem.ww(scene.player + Defs.ob_lives, 5);        // vies de départ (init standalone)
         buildLevel();
         rootNode.attachChild(enemies);
+        rootNode.attachChild(goreNode);
         enemies.setShadowMode(ShadowMode.Off);         // pas d'ombre carrée depuis les quads sprites
+        goreNode.setShadowMode(ShadowMode.Off);
 
         // éclairage de base volontairement bas → les point lights créent de vrais halos (ambiance)
         DirectionalLight sun = new DirectionalLight(new Vector3f(-0.4f, -0.9f, -0.3f).normalizeLocal(),
@@ -132,9 +135,10 @@ public final class Rebirth extends SimpleApplication {
         rootNode.addLight(sun);
         rootNode.addLight(new AmbientLight(ColorRGBA.White.mult(0.22f)));
         viewPort.setBackgroundColor(new ColorRGBA(0.02f, 0.02f, 0.04f, 1f));
-        // plan near PROCHE : sans ça, en s'approchant d'un mur le polygone croise le plan near et
-        // se fait clipper (le mur « disparaît » de près). near 0.05 = ~3 unités gloom.
-        cam.setFrustumPerspective(45f, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f);
+        // FOV LARGE (~70° vertical) : Gloom a un champ de vision large (fish-eye) ; un FOV étroit
+        // fait paraître le déplacement lent. Plan near PROCHE (0.05) : sinon en s'approchant d'un mur
+        // le polygone croise le plan near et se fait clipper (le mur « disparaît » de près).
+        cam.setFrustumPerspective(70f, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f);
 
         // single-pass : permet plusieurs point lights en une passe (perf)
         renderManager.setPreferredLightMode(TechniqueDef.LightMode.SinglePass);
@@ -186,7 +190,8 @@ public final class Rebirth extends SimpleApplication {
         viewPort.addProcessor(dlsr);
 
         FilterPostProcessor fpp = new FilterPostProcessor(assetManager);
-        FogFilter fog = new FogFilter(new ColorRGBA(0.03f, 0.03f, 0.06f, 1f), 1.2f, 55f);
+        // brouillard SUBTIL (profondeur d'ambiance) : densité 1.2 faisait un « filtre » devant le joueur.
+        FogFilter fog = new FogFilter(new ColorRGBA(0.03f, 0.03f, 0.06f, 1f), 0.5f, 120f);
         fpp.addFilter(fog);
         viewPort.addProcessor(fpp);
     }
@@ -240,6 +245,7 @@ public final class Rebirth extends SimpleApplication {
         rebuildWalls();                                 // portes/rotpolys/morphs : géométrie suit la simu
         updateMuzzle();
         updateEnemies();
+        renderGore();                                   // décals de gore au sol (gibs retombés)
         updateHud();
         if (audio != null) audio.updateMusic();         // pompe le streaming MED (thread principal)
     }
@@ -321,6 +327,50 @@ public final class Rebirth extends SimpleApplication {
             spritePool.add(g);
         }
         return spritePool.get(slot);
+    }
+
+    /**
+     * Décals de gore au sol (liste Vars.gore) : un gib retombé (chunklogic, mode≠0) est retiré des
+     * objets et déposé ici (go_x/go_z/go_shape). Le 2D les dessine via drawshape_q à plat sur le sol ;
+     * en 3D on pose un quad HORIZONTAL au niveau du sol.
+     */
+    private void renderGore() {
+        goreNode.detachAllChildren();
+        int g = Vars.gore;
+        while (true) {
+            g = Mem.l(g);
+            if (Mem.l(g) == 0) break;                  // sentinelle (.succ==0)
+            int shape = Mem.l(g + Defs.go_shape);
+            if (shape == 0) continue;
+            int w = Mem.uw(shape + 4), h = Mem.uw(shape + 6);
+            if (w <= 0 || h <= 0 || w > 256 || h > 256) continue;
+            int gx = (short) Mem.w(g + Defs.go_x), gz = (short) Mem.w(g + Defs.go_z);
+            Texture2D tex = spriteCache.computeIfAbsent(shape, k -> spriteTexture(shape));
+            Geometry q = new Geometry("gore", floorQuad(w * 2f * S, h * 2f * S));   // échelle 0x200
+            Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+            mat.setTexture("ColorMap", tex);
+            mat.setFloat("AlphaDiscardThreshold", 0.5f);
+            mat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
+            q.setMaterial(mat);
+            q.setLocalTranslation(-gx * S, 0.02f, gz * S);   // X miroir ; juste au-dessus du sol (anti z-fight)
+            goreNode.attachChild(q);
+        }
+    }
+
+    /** Quad HORIZONTAL (plan XZ) centré, normale +Y — pour les décals de sol. */
+    private Mesh floorQuad(float w, float d) {
+        float x = w / 2, z = d / 2;
+        float[] pos = { -x, 0, -z, x, 0, -z, x, 0, z, -x, 0, z };
+        float[] nor = { 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0 };
+        float[] uv = { 0, 0, 1, 0, 1, 1, 0, 1 };
+        int[] idx = { 0, 1, 2, 0, 2, 3 };
+        Mesh m = new Mesh();
+        m.setBuffer(VertexBuffer.Type.Position, 3, BufferUtils.createFloatBuffer(pos));
+        m.setBuffer(VertexBuffer.Type.Normal, 3, BufferUtils.createFloatBuffer(nor));
+        m.setBuffer(VertexBuffer.Type.TexCoord, 2, BufferUtils.createFloatBuffer(uv));
+        m.setBuffer(VertexBuffer.Type.Index, 3, BufferUtils.createIntBuffer(idx));
+        m.updateBound();
+        return m;
     }
 
     /** Réplique la sélection de frame (drawshape_8 : 8 directions + anim ; sinon 1 frame). */
