@@ -114,6 +114,7 @@ public final class Rebirth extends SimpleApplication {
     private boolean inOptions, awaitingKey;
     private int optRow, awaitRow, lastW, lastH;
     private boolean pOptU, pOptD, pOptL, pOptR, pOptF, kEsc, prevEsc;
+    private ActionListener actionL;                               // listener des contrôles (ré-attaché après remap)
     private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)
     private final Map<Integer, Integer> slotOfBase = new HashMap<>();    // pointeur pixels initial → slot (= frame d'anim) pour le HD
     private PointLight torch;                                        // lumière portée par le joueur
@@ -1103,8 +1104,7 @@ public final class Rebirth extends SimpleApplication {
         // on gère Échap nous-mêmes (menu/options/jeu) au lieu de quitter brutalement l'app.
         if (inputManager.hasMapping(SimpleApplication.INPUT_MAPPING_EXIT))
             inputManager.deleteMapping(SimpleApplication.INPUT_MAPPING_EXIT);
-        inputManager.addMapping("esc", new KeyTrigger(KeyInput.KEY_ESCAPE));
-        ActionListener al = (name, pressed, tpf) -> {
+        actionL = (name, pressed, tpf) -> {
             switch (name) {
                 case "fwd" -> kFwd = pressed;   case "back" -> kBack = pressed;
                 case "left" -> kLeft = pressed; case "right" -> kRight = pressed;
@@ -1112,8 +1112,9 @@ public final class Rebirth extends SimpleApplication {
                 case "fire" -> kFire = pressed; case "esc" -> kEsc = pressed;
             }
         };
-        inputManager.addListener(al, "fwd", "back", "left", "right", "sl", "sr", "fire", "esc");
-        applyBindings();                               // crée les mappings de touches depuis opt
+        inputManager.addMapping("esc", new KeyTrigger(KeyInput.KEY_ESCAPE));
+        inputManager.addListener(actionL, "esc");
+        applyBindings();                               // crée les mappings de touches depuis opt (+ listener)
 
         // MOUSELOOK (delta X en pixels) + CAPTURE de touche pour le remap (mode options).
         inputManager.addRawInputListener(new RawInputListener() {
@@ -1137,8 +1138,8 @@ public final class Rebirth extends SimpleApplication {
 
     /** (Re)crée les mappings de touches depuis {@link #opt} (appelé à l'init et après un remap). */
     private void applyBindings() {
-        for (String n : new String[]{"fwd", "back", "left", "right", "sl", "sr", "fire"})
-            if (inputManager.hasMapping(n)) inputManager.deleteMapping(n);
+        String[] names = {"fwd", "back", "left", "right", "sl", "sr", "fire"};
+        for (String n : names) if (inputManager.hasMapping(n)) inputManager.deleteMapping(n);
         inputManager.addMapping("fwd", new KeyTrigger(opt.kForward), new KeyTrigger(KeyInput.KEY_UP));   // ↑ = nav menu
         inputManager.addMapping("back", new KeyTrigger(opt.kBack), new KeyTrigger(KeyInput.KEY_DOWN));
         inputManager.addMapping("left", new KeyTrigger(opt.kLeft));
@@ -1148,6 +1149,8 @@ public final class Rebirth extends SimpleApplication {
         // tir : touche configurable + Espace/Entrée (validation menu) + CLIC GAUCHE souris
         inputManager.addMapping("fire", new KeyTrigger(opt.kFire), new KeyTrigger(KeyInput.KEY_SPACE),
                 new KeyTrigger(KeyInput.KEY_RETURN), new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
+        // RÉ-ATTACHE le listener : deleteMapping a détaché l'ancien (sinon plus aucune entrée clavier/tir).
+        inputManager.addListener(actionL, names);
     }
 
     /** Affecte le code touche capturé à l'action de la ligne d'options. */
