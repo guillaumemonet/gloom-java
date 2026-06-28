@@ -116,6 +116,7 @@ public final class Rebirth extends SimpleApplication {
     private boolean pOptU, pOptD, pOptL, pOptR, pOptF, kEsc, prevEsc;
     private ActionListener actionL;                               // listener des contrôles (ré-attaché après remap)
     private long lastWallsHash, lastGoreHash;                     // évite de reconstruire murs/gore chaque frame (anti-GC)
+    private final int[] fbW = new int[1], fbH = new int[1];       // taille réelle du framebuffer (plein écran/DPI)
     private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)
     private final Map<Integer, Integer> slotOfBase = new HashMap<>();    // pointeur pixels initial → slot (= frame d'anim) pour le HD
     private PointLight torch;                                        // lumière portée par le joueur
@@ -342,7 +343,7 @@ public final class Rebirth extends SimpleApplication {
         int hp = Math.max(0, Mem.w(p + Defs.ob_hitpoints));
         int lives = Mem.w(p + Defs.ob_lives);
         int weapon = Mem.w(p + Defs.ob_weapon) + 1;
-        float h = settings.getHeight();
+        float h = cam.getHeight();                       // vraie hauteur (framebuffer), pas la résolution logique
         hpBar.setLocalScale(Math.min(25, hp) * 8f, 14f, 1f);     // barre 0..200 px
         hpBar.setLocalTranslation(14, h - 30, 0);
         ((Material) hpBar.getMaterial()).setColor("Color",
@@ -355,8 +356,11 @@ public final class Rebirth extends SimpleApplication {
     public void simpleUpdate(float tpf) {
         frame++;
         grabCursor();                                   // maintient le verrou souris (JME peut le relâcher)
-        if (cam.getWidth() != lastW || cam.getHeight() != lastH) {   // résolution changée (restart) → relayout
-            lastW = cam.getWidth(); lastH = cam.getHeight(); relayoutGui();
+        if (glfwWindow != 0L) {                         // détecte le vrai framebuffer (plein écran/DPI) → relayout
+            org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(glfwWindow, fbW, fbH);
+            if (fbW[0] > 0 && fbH[0] > 0 && (fbW[0] != lastW || fbH[0] != lastH)) {
+                lastW = fbW[0]; lastH = fbH[0]; relayoutGui();
+            }
         }
         boolean fire = kFire;
 
@@ -526,11 +530,15 @@ public final class Rebirth extends SimpleApplication {
         restart();
     }
 
-    /** Réajuste les éléments guiNode (overlays plein écran) + FOV après un changement de résolution. */
+    /** Réajuste tout sur la VRAIE taille du framebuffer (plein écran/DPI) : viewports, overlays, FOV. */
     private void relayoutGui() {
-        redOverlay.setMesh(new Quad(cam.getWidth(), cam.getHeight()));
-        storyQuad.setMesh(new Quad(cam.getWidth(), cam.getHeight()));
-        cam.setFrustumPerspective(opt.fov, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f);
+        org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(glfwWindow, fbW, fbH);
+        int w = Math.max(1, fbW[0] > 0 ? fbW[0] : cam.getWidth());   // jamais 0 → pas d'aspect NaN (crash GL)
+        int h = Math.max(1, fbH[0] > 0 ? fbH[0] : cam.getHeight());
+        renderManager.notifyReshape(w, h);              // recadre viewports 3D + GUI + post-effets sur w×h
+        redOverlay.setMesh(new Quad(w, h));
+        storyQuad.setMesh(new Quad(w, h));
+        cam.setFrustumPerspective(opt.fov, (float) w / h, 0.05f, 400f);
         grabCursor();
     }
 
