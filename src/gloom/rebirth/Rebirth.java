@@ -8,8 +8,10 @@ import com.jme3.input.controls.ActionListener;
 import com.jme3.input.controls.KeyTrigger;
 import com.jme3.light.AmbientLight;
 import com.jme3.light.DirectionalLight;
+import com.jme3.light.PointLight;
 import com.jme3.material.Material;
 import com.jme3.material.RenderState;
+import com.jme3.material.TechniqueDef;
 import com.jme3.math.ColorRGBA;
 import com.jme3.math.FastMath;
 import com.jme3.math.Vector3f;
@@ -78,6 +80,8 @@ public final class Rebirth extends SimpleApplication {
     private final Node enemies = new Node("enemies");
     private final Map<Integer, Texture2D> wallTexCache = new HashMap<>();
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
+    private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
+    private PointLight torch;                                        // lumière portée par le joueur
     private int frame;
     // état des contrôles (held)
     private boolean kFwd, kBack, kLeft, kRight, kStrafeL, kStrafeR, kFire;
@@ -112,12 +116,21 @@ public final class Rebirth extends SimpleApplication {
         rootNode.attachChild(enemies);
         enemies.setShadowMode(ShadowMode.Off);         // pas d'ombre carrée depuis les quads sprites
 
+        // éclairage de base volontairement bas → les point lights créent de vrais halos (ambiance)
         DirectionalLight sun = new DirectionalLight(new Vector3f(-0.4f, -0.9f, -0.3f).normalizeLocal(),
-                ColorRGBA.White.mult(0.85f));
+                ColorRGBA.White.mult(0.35f));
         rootNode.addLight(sun);
-        rootNode.addLight(new AmbientLight(ColorRGBA.White.mult(0.45f)));
+        rootNode.addLight(new AmbientLight(ColorRGBA.White.mult(0.22f)));
         viewPort.setBackgroundColor(new ColorRGBA(0.02f, 0.02f, 0.04f, 1f));
         cam.setFrustumFar(6000f);
+
+        // single-pass : permet plusieurs point lights en une passe (perf)
+        renderManager.setPreferredLightMode(TechniqueDef.LightMode.SinglePass);
+        renderManager.setSinglePassLightBatchSize(16);
+
+        // torche du joueur (suit la caméra) — éclaire la zone proche dans le noir/brouillard
+        torch = new PointLight(new Vector3f(), ColorRGBA.White.mult(1.6f), 1100f * S);
+        rootNode.addLight(torch);
 
         setupPostFx(sun);
         setupHud();
@@ -216,6 +229,7 @@ public final class Rebirth extends SimpleApplication {
         float pz = (Mem.l(p + Defs.ob_z) >> 16) * S;
         float eye = 110f * S;
         cam.setLocation(new Vector3f(px, eye, pz));
+        if (torch != null) torch.setPosition(new Vector3f(px, eye, pz));   // la torche suit le joueur
         float theta = ((Mem.l(p + Defs.ob_rot) >> 16) & 0xff) * FastMath.TWO_PI / 256f;
         cam.lookAt(new Vector3f(px + FastMath.sin(theta), eye, pz + FastMath.cos(theta)), Vector3f.UNIT_Y);
     }
@@ -334,6 +348,25 @@ public final class Rebirth extends SimpleApplication {
         }
         if (Mem.l(Vars.floor) != 0) rootNode.attachChild(plane("floor", minX, maxX, minZ, maxZ, 0, tileTexture(Mem.l(Vars.floor))));
         if (Mem.l(Vars.roof) != 0) rootNode.attachChild(plane("ceil", minX, maxX, minZ, maxZ, WALL_H, tileTexture(Mem.l(Vars.roof))));
+
+        // point lights sur les murs à texture ÉMISSIVE (panneaux/écrans lumineux) — texLight rempli
+        // pendant wallTexture(). Dédoublonnage par cellule de grille + plafonné (perf single-pass).
+        Set<Long> usedCells = new HashSet<>();
+        int added = 0;
+        for (var e : byTex.entrySet()) {
+            float[] col = texLight.get(e.getKey());
+            if (col == null) continue;                 // texture non émissive
+            for (float[] w : e.getValue()) {
+                if (added >= 14) break;
+                float cx = (w[0] + w[2]) / 2, cz = (w[1] + w[3]) / 2;
+                long cell = ((long) Math.round(cx / 384) << 20) ^ Math.round(cz / 384);
+                if (!usedCells.add(cell)) continue;    // déjà une lumière dans cette zone
+                PointLight pl = new PointLight(new Vector3f(cx * S, WALL_H * 0.45f, cz * S),
+                        new ColorRGBA(col[0], col[1], col[2], 1f).mult(2.2f), 520f * S);
+                rootNode.addLight(pl);
+                added++;
+            }
+        }
     }
 
     private Mesh wallMesh(List<float[]> walls) {
@@ -393,14 +426,19 @@ public final class Rebirth extends SimpleApplication {
         return wallTexCache.computeIfAbsent(n, k -> {
             int base = Mem.l(Vars.textures + k * 4), rgbs = Mem.l(Vars.map_rgbs);
             ByteBuffer buf = BufferUtils.createByteBuffer(64 * 64 * 4);
+            long br = 0, bg = 0, bb = 0; int bright = 0;   // stats des pixels lumineux (→ émissivité)
             for (int col = 0; col < 64; col++) {
                 int cb = base + col * 65 + 1;
                 for (int row = 0; row < 64; row++) {
                     int rgb = base == 0 ? 0x808080 : colorOf(rgbs, Mem.ub(cb + row));
+                    int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+                    if (0.30f * r + 0.59f * g + 0.11f * b > 165) { br += r; bg += g; bb += b; bright++; }
                     int p = ((63 - row) * 64 + col) * 4;
-                    buf.put(p, (byte) (rgb >> 16)).put(p + 1, (byte) (rgb >> 8)).put(p + 2, (byte) rgb).put(p + 3, (byte) 0xff);
+                    buf.put(p, (byte) r).put(p + 1, (byte) g).put(p + 2, (byte) b).put(p + 3, (byte) 0xff);
                 }
             }
+            if (bright > 64 * 64 * 0.045f)                 // >4,5% de pixels brillants → texture émissive
+                texLight.put(k, new float[]{br / (bright * 255f), bg / (bright * 255f), bb / (bright * 255f)});
             return makeTex(buf, 64, 64);
         });
     }
