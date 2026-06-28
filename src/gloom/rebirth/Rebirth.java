@@ -92,6 +92,11 @@ public final class Rebirth extends SimpleApplication {
     private Image storyImg;                                          // image dynamique de l'overlay
     private ByteBuffer storyBuf;                                     // pixels RGBA de l'overlay
     private boolean prevFireOver;                                    // front montant du feu (écran de fin)
+    private gloom.host.Menu menu;                                    // menu titre (NEW GAME / CONTINUE / ABOUT / EXIT)
+    private boolean inMenu = true;                                   // true = menu/about ; false = en jeu
+    private boolean aboutMode;                                       // écran « about » affiché
+    private boolean prevMenuFire;                                    // front montant du feu (menu/about/fin)
+    private String hdEpisode = "";                                   // épisode courant (dossier HD : hd/<épisode>/)
     private static final int FB_W = 320, FB_H = 240;                // taille du framebuffer 2D de Game
     private final Node enemies = new Node("enemies");
     private final Node goreNode = new Node("gore");                  // décals de gore au sol (liste Vars.gore)
@@ -191,14 +196,25 @@ public final class Rebirth extends SimpleApplication {
         bindKeys();
         if (!HEADLESS) initAudio();                    // SFX (Paula→OpenAL) + musique MED
 
-        // SÉQUENCEUR DE JEU COMPLET : script → écrans d'histoire + enchaînement des niveaux + fin.
-        game = new Game();
-        game.boot(FB_W, FB_H, 0);
-        if (HEADLESS) {                                // capture : saute l'intro jusqu'au 1er niveau
+        // MENU TITRE → SÉQUENCEUR DE JEU COMPLET (host.Game : histoire + niveaux + fin + reprise).
+        menu = new gloom.host.Menu();
+        if (HEADLESS) {                                // capture : démarre direct + saute l'intro
+            startGame(0);
             for (int i = 0; i < 60 && game.phase != Game.Phase.PLAYING; i++) { game.update(false); game.update(true); }
             if (game.scene != null) { scene = lastScene = game.scene; loadLevelGeometry(); spawnDemoEnemy(); }
             attachScreenshot();
+        } else {
+            inMenu = true;
+            menu.init(FB_W, FB_H);
         }
+    }
+
+    /** Démarre une partie (skip = point de contrôle pour CONTINUE, 0 = début). */
+    private void startGame(int skip) {
+        game = new Game();
+        game.boot(FB_W, FB_H, skip);
+        lastScene = null;                              // force loadLevelGeometry au 1er niveau
+        inMenu = false;
     }
 
     /** Overlay plein écran (guiNode) affichant le framebuffer 2D de Game (histoire, game over). */
@@ -330,6 +346,28 @@ public final class Rebirth extends SimpleApplication {
         frame++;
         grabCursor();                                   // maintient le verrou souris (JME peut le relâcher)
         boolean fire = kFire;
+
+        // ----- MENU TITRE / ABOUT (overlay 2D plein écran) -----
+        if (inMenu) {
+            if (aboutMode) {
+                renderAbout();
+                if (fire && !prevMenuFire) { aboutMode = false; menu.init(FB_W, FB_H); }
+            } else {
+                menu.update(kFwd, kBack, fire);          // ↑/↓ + feu (fronts gérés par Menu)
+                switch (menu.selectedAction) {
+                    case NEW_GAME -> startGame(0);
+                    case CONTINUE -> startGame(menu.selectedCheckpoint);
+                    case ABOUT -> { aboutMode = true; menu.selectedAction = gloom.host.Menu.Action.NONE; }
+                    case EXIT -> stop();
+                    case NONE -> menu.render();
+                }
+            }
+            prevMenuFire = fire;
+            if (inMenu) { uploadStoryFramebuffer(); showWorld(false); }   // startGame() a pu basculer en jeu
+            if (audio != null) audio.updateMusic();
+            return;
+        }
+
         boolean playing = game.phase == Game.Phase.PLAYING && game.scene != null;
 
         // input → niveau courant (uniquement en jeu)
@@ -339,10 +377,11 @@ public final class Rebirth extends SimpleApplication {
             int joyx = joys != 0 ? (kStrafeL ? -1 : 1) : (kLeft ? -1 : (kRight ? 1 : 0));
             game.scene.setInput(joyx, joyy, fire ? -1 : 0, joys);
         }
-        // écran de fin : feu → relance une partie
+        // écran de fin : feu → retour au menu titre (la branche menu reprend la main)
         if (game.phase == Game.Phase.OVER) {
-            if (fire && !prevFireOver) game.restart();
+            if (fire && !prevFireOver) { inMenu = true; menu.init(FB_W, FB_H); prevMenuFire = true; }
             prevFireOver = fire;
+            if (inMenu) { if (audio != null) audio.updateMusic(); return; }
         }
 
         // pas de temps FIXE : game.update() à cadence constante (logique = 30*SPEED Hz ; tick() fait la
@@ -388,6 +427,16 @@ public final class Rebirth extends SimpleApplication {
         }
         showWorld(playing);                             // bascule monde 3D ↔ overlay 2D
         if (audio != null) audio.updateMusic();         // pompe le streaming MED (thread principal)
+    }
+
+    /** Écran « about » (dessiné dans le framebuffer 2D, affiché en overlay). */
+    private void renderAbout() {
+        int fb = Mem.l(Vars.cop);
+        for (int i = 0; i < FB_W * FB_H; i++) Mem.ww(fb + i * 2, 0);
+        gloom.host.Font.drawCenteredBig(fb, FB_W, FB_H, FB_H / 2 - 40, "GLOOM", 0xf00);
+        gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H / 2 - 4, "BLACK MAGIC SOFTWARE 1995", 0x0f0);
+        gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H / 2 + 8, "PORTAGE JAVA - REBIRTH 3D", 0x0ff);
+        gloom.host.Font.drawCenteredBig(fb, FB_W, FB_H, FB_H - 24, "PRESS FIRE", 0xff0);
     }
 
     /** Bascule l'affichage : monde 3D + HUD (en jeu) ou overlay 2D plein écran (histoire / game over). */
@@ -636,6 +685,7 @@ public final class Rebirth extends SimpleApplication {
      * car palette et textures diffèrent par niveau.
      */
     private void loadLevelGeometry() {
+        hdEpisode = episodeOf(game.currentMap);                    // dossier HD : hd/<épisode>/ (ex. map1)
         // --- purge du niveau précédent ---
         walls.detachAllChildren();
         enemies.detachAllChildren();
@@ -829,7 +879,7 @@ public final class Rebirth extends SimpleApplication {
             // animée afficherait une frame HD figée. hdNumberFor() résout le pointeur courant → slot.
             // PAS de HD pour les murs AJOURÉS : un PNG est opaque → les trous (alpha) seraient perdus.
             // (Pour du HD see-through il faudrait cuire le masque alpha dans le PNG — repoussé.)
-            Texture2D hd = holed ? null : loadHd("hd/wall_" + hdNumberFor(k) + ".png");
+            Texture2D hd = holed ? null : loadHdEpisodic("wall_" + hdNumberFor(k) + ".png");
             return hd != null ? hd : proc;
         });
     }
@@ -859,6 +909,18 @@ public final class Rebirth extends SimpleApplication {
         return slot != null ? slot : n;
     }
 
+    /** Préfixe d'épisode d'une map (ex. "map1_3" → "map1") = dossier de textures HD. */
+    private static String episodeOf(String map) {
+        int u = map.indexOf('_');
+        return u > 0 ? map.substring(0, u) : map;
+    }
+
+    /** HD par ÉPISODE : essaie hd/&lt;épisode&gt;/&lt;file&gt; puis hd/&lt;file&gt; (global) ; null sinon. */
+    private Texture2D loadHdEpisodic(String file) {
+        Texture2D t = loadHd("hd/" + hdEpisode + "/" + file);
+        return t != null ? t : loadHd("hd/" + file);
+    }
+
     /** Charge une texture HD optionnelle depuis &lt;cwd&gt;/hd/ ; null si absente (→ repli procédural). */
     private Texture2D loadHd(String path) {
         if (!new java.io.File(path).isFile()) return null;     // pas d'asset → repli (sans spam de log)
@@ -875,7 +937,7 @@ public final class Rebirth extends SimpleApplication {
     }
 
     private Texture2D tileTexture(int base, String hdName) {
-        Texture2D hd = loadHd("hd/" + hdName + ".png");        // hd/floor.png / hd/roof.png optionnels
+        Texture2D hd = loadHdEpisodic(hdName + ".png");        // hd/<épisode>/floor|roof.png, sinon global
         if (hd != null) return hd;
         int rgbs = Mem.l(Vars.map_rgbs);
         ByteBuffer buf = BufferUtils.createByteBuffer(128 * 128 * 4);

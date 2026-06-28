@@ -36,33 +36,38 @@ def main():
 
     if not os.path.isdir(args.src):
         sys.exit(f"Dossier source introuvable : {args.src}  (lance d'abord 'gradle dumpTextures')")
-    files = sorted(f for f in os.listdir(args.src) if f.lower().endswith('.png'))
-    if not files:
-        sys.exit(f"Aucun PNG dans {args.src}")
-    os.makedirs(args.out, exist_ok=True)
+    # parcourt RÉCURSIVEMENT (sous-dossiers par épisode : hd_src/map1/...) en conservant l'arborescence.
+    pairs = []
+    for root, _dirs, names in os.walk(args.src):
+        for f in names:
+            if f.lower().endswith('.png'):
+                rel = os.path.relpath(os.path.join(root, f), args.src)
+                pairs.append((os.path.join(args.src, rel), os.path.join(args.out, rel)))
+    if not pairs:
+        sys.exit(f"Aucun PNG sous {args.src}")
 
     backend = args.backend
     if backend == 'auto':
         backend = 'realesrgan' if shutil.which('realesrgan-ncnn-vulkan') else 'pillow'
-    print(f"Backend : {backend}  |  {len(files)} textures  |  x{args.scale}  ->  {args.out}")
+    print(f"Backend : {backend}  |  {len(pairs)} textures  |  x{args.scale}  ->  {args.out}")
 
-    if backend == 'realesrgan':
-        for f in files:
-            src = os.path.join(args.src, f)
-            dst = os.path.join(args.out, f)
-            subprocess.run(['realesrgan-ncnn-vulkan', '-i', src, '-o', dst,
-                            '-s', str(args.scale), '-n', args.model], check=True)
-            print('  HD', f)
-    else:
+    pil = None
+    if backend == 'pillow':
         try:
-            from PIL import Image
+            from PIL import Image as pil
         except ImportError:
             sys.exit("Pillow manquant : `pip install pillow` (ou installe Real-ESRGAN pour la vraie IA).")
-        for f in files:
-            im = Image.open(os.path.join(args.src, f)).convert('RGB')
-            im = im.resize((im.width * args.scale, im.height * args.scale), Image.LANCZOS)
-            im.save(os.path.join(args.out, f))
-            print('  HD', f)
+
+    for src, dst in pairs:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if backend == 'realesrgan':
+            subprocess.run(['realesrgan-ncnn-vulkan', '-i', src, '-o', dst,
+                            '-s', str(args.scale), '-n', args.model], check=True)
+        else:
+            im = pil.open(src).convert('RGB')
+            im = im.resize((im.width * args.scale, im.height * args.scale), pil.LANCZOS)
+            im.save(dst)
+        print('  HD', os.path.relpath(dst, args.out))
 
     print(f"Termine -> {args.out}  (rebirth les chargera automatiquement)")
 

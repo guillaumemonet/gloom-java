@@ -27,7 +27,9 @@ public final class TextureDump {
     public static void main(String[] args) throws IOException {
         String map = System.getProperty("map", "map1_3");
         String tile = System.getProperty("tile", "1");
-        String out = System.getProperty("out", "hd_src");
+        // sortie par ÉPISODE par défaut (ex. map1_3 → hd_src/map1) : les textures sont partagées par épisode.
+        String episode = map.indexOf('_') > 0 ? map.substring(0, map.indexOf('_')) : map;
+        String out = System.getProperty("out", "hd_src/" + episode);
 
         LevelScene scene = new LevelScene();
         scene.init(320, 240, map, tile);                 // charge map + textures + palette
