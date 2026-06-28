@@ -101,6 +101,8 @@ public final class Rebirth extends SimpleApplication {
     // HUD
     private Geometry hpBar;
     private BitmapText hudText;
+    private Geometry redOverlay;                                    // voile rouge plein écran (coups + mort)
+    private float redFlash;                                        // intensité du flash de coup (décroît)
     // audio (réutilise la pile host.Audio + MedPlayer + Sfx du port 2D ; JME audio désactivé)
     private Audio audio;
 
@@ -211,7 +213,29 @@ public final class Rebirth extends SimpleApplication {
         hudText.setSize(font.getCharSet().getRenderedSize());
         hudText.setColor(new ColorRGBA(0.85f, 0.55f, 1f, 1f));   // violet, comme Gloom
         guiNode.attachChild(hudText);
+
+        // voile rouge plein écran (équivalent de redpal : flash quand on encaisse, soutenu à la mort)
+        redOverlay = new Geometry("dmg", new Quad(cam.getWidth(), cam.getHeight()));
+        Material rm = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        rm.setColor("Color", new ColorRGBA(0.75f, 0f, 0f, 0f));
+        rm.getAdditionalRenderState().setBlendMode(RenderState.BlendMode.Alpha);
+        redOverlay.setMaterial(rm);
+        redOverlay.setCullHint(Spatial.CullHint.Always);
+        guiNode.attachChild(redOverlay);                          // au-dessus : tout l'écran rougit
         updateHud();
+    }
+
+    /**
+     * Feedback de dégâts (équivalent de redpal, gloom.s:4618) : la simu pose ob_paltimer=2 quand le
+     * joueur encaisse un coup → flash rouge ; à la mort (PV≤0) le rouge reste soutenu.
+     */
+    private void updateDamageFx() {
+        int p = scene.player;
+        if (Mem.w(p + Defs.ob_paltimer) > 0) redFlash = 0.45f;    // coup/tir encaissé → flash
+        redFlash *= 0.86f;                                        // décroissance
+        float a = (Mem.w(p + Defs.ob_hitpoints) <= 0) ? 0.55f : (redFlash < 0.02f ? 0f : redFlash);
+        ((Material) redOverlay.getMaterial()).setColor("Color", new ColorRGBA(0.75f, 0f, 0f, a));
+        redOverlay.setCullHint(a <= 0f ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
     }
 
     private void updateHud() {
@@ -249,6 +273,7 @@ public final class Rebirth extends SimpleApplication {
         updateEnemies();
         renderGore();                                   // décals de gore au sol (gibs retombés)
         updateHud();
+        updateDamageFx();                               // flash rouge (coups) + rouge mort
         if (audio != null) audio.updateMusic();         // pompe le streaming MED (thread principal)
     }
 
