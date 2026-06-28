@@ -54,6 +54,7 @@ import gloom.Vars;
 import gloom.data.ObjInfo;
 import gloom.data.Tables;
 import gloom.host.Audio;
+import gloom.host.Game;
 import gloom.host.LevelScene;
 
 import javax.imageio.ImageIO;
@@ -83,6 +84,15 @@ public final class Rebirth extends SimpleApplication {
     private static final String TILE = System.getProperty("tile", "1");
 
     private LevelScene scene;
+    private LevelScene lastScene;                                    // détecte le changement de niveau
+    private Game game;                                               // séquenceur (script → histoire + niveaux)
+    private Geometry floorGeom, ceilGeom;                            // sol/plafond du niveau (détachés au changement)
+    private final List<PointLight> levelLights = new ArrayList<>();  // point lights émissives du niveau courant
+    private Geometry storyQuad;                                      // overlay plein écran : framebuffer 2D
+    private Image storyImg;                                          // image dynamique de l'overlay
+    private ByteBuffer storyBuf;                                     // pixels RGBA de l'overlay
+    private boolean prevFireOver;                                    // front montant du feu (écran de fin)
+    private static final int FB_W = 320, FB_H = 240;                // taille du framebuffer 2D de Game
     private final Node enemies = new Node("enemies");
     private final Node goreNode = new Node("gore");                  // décals de gore au sol (liste Vars.gore)
     private final Node walls = new Node("walls");                    // murs reconstruits chaque frame (portes animées)
@@ -141,10 +151,7 @@ public final class Rebirth extends SimpleApplication {
         // textures HD optionnelles : PNG dans <cwd>/hd/ (cwd = dépôt assets). Repli sur le procédural.
         assetManager.registerLocator(".", FileLocator.class);
 
-        scene = new LevelScene();
-        scene.init(320, 240, MAP, TILE);
-        Mem.ww(scene.player + Defs.ob_lives, 5);        // vies de départ (init standalone)
-        buildLevel();
+        rootNode.attachChild(walls);                   // géométrie du niveau (reconstruite par frame)
         rootNode.attachChild(enemies);
         rootNode.attachChild(goreNode);
         enemies.setShadowMode(ShadowMode.Off);         // pas d'ombre carrée depuis les quads sprites
@@ -180,10 +187,33 @@ public final class Rebirth extends SimpleApplication {
 
         setupPostFx(sun);
         setupHud();
+        setupStoryOverlay();                           // overlay 2D pour écrans d'histoire / game over
         bindKeys();
         if (!HEADLESS) initAudio();                    // SFX (Paula→OpenAL) + musique MED
-        if (HEADLESS) { spawnDemoEnemy(); attachScreenshot(); }
-        updateCamera();
+
+        // SÉQUENCEUR DE JEU COMPLET : script → écrans d'histoire + enchaînement des niveaux + fin.
+        game = new Game();
+        game.boot(FB_W, FB_H, 0);
+        if (HEADLESS) {                                // capture : saute l'intro jusqu'au 1er niveau
+            for (int i = 0; i < 60 && game.phase != Game.Phase.PLAYING; i++) { game.update(false); game.update(true); }
+            if (game.scene != null) { scene = lastScene = game.scene; loadLevelGeometry(); spawnDemoEnemy(); }
+            attachScreenshot();
+        }
+    }
+
+    /** Overlay plein écran (guiNode) affichant le framebuffer 2D de Game (histoire, game over). */
+    private void setupStoryOverlay() {
+        storyBuf = BufferUtils.createByteBuffer(FB_W * FB_H * 4);
+        storyImg = new Image(Image.Format.RGBA8, FB_W, FB_H, storyBuf, ColorSpace.sRGB);
+        Texture2D tex = new Texture2D(storyImg);
+        tex.setMagFilter(Texture.MagFilter.Bilinear);
+        tex.setMinFilter(Texture.MinFilter.BilinearNoMipMaps);
+        storyQuad = new Geometry("story", new Quad(cam.getWidth(), cam.getHeight()));
+        Material m = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        m.setTexture("ColorMap", tex);
+        storyQuad.setMaterial(m);
+        storyQuad.setCullHint(Spatial.CullHint.Always);
+        guiNode.attachChild(storyQuad);
     }
 
     /**
@@ -266,7 +296,6 @@ public final class Rebirth extends SimpleApplication {
         redOverlay.setMaterial(rm);
         redOverlay.setCullHint(Spatial.CullHint.Always);
         guiNode.attachChild(redOverlay);                          // au-dessus : tout l'écran rougit
-        updateHud();
     }
 
     /**
@@ -300,33 +329,93 @@ public final class Rebirth extends SimpleApplication {
     public void simpleUpdate(float tpf) {
         frame++;
         grabCursor();                                   // maintient le verrou souris (JME peut le relâcher)
-        int joyy = kFwd ? -1 : (kBack ? 1 : 0);
-        int joys = (kStrafeL || kStrafeR) ? -1 : 0;
-        int joyx = joys != 0 ? (kStrafeL ? -1 : 1) : (kLeft ? -1 : (kRight ? 1 : 0));
-        scene.setInput(joyx, joyy, kFire ? -1 : 0, joys);
-        // pas de temps FIXE : tick() à cadence constante quel que soit le framerate (logique = 30*SPEED Hz ;
-        // tick() ne fait la logique qu'1 appel sur 2). SPEED>1 → jeu plus rapide que l'original.
-        acc += Math.min(tpf, 0.25f);                    // cap anti-spirale de la mort
+        boolean fire = kFire;
+        boolean playing = game.phase == Game.Phase.PLAYING && game.scene != null;
+
+        // input → niveau courant (uniquement en jeu)
+        if (playing) {
+            int joyy = kFwd ? -1 : (kBack ? 1 : 0);
+            int joys = (kStrafeL || kStrafeR) ? -1 : 0;
+            int joyx = joys != 0 ? (kStrafeL ? -1 : 1) : (kLeft ? -1 : (kRight ? 1 : 0));
+            game.scene.setInput(joyx, joyy, fire ? -1 : 0, joys);
+        }
+        // écran de fin : feu → relance une partie
+        if (game.phase == Game.Phase.OVER) {
+            if (fire && !prevFireOver) game.restart();
+            prevFireOver = fire;
+        }
+
+        // pas de temps FIXE : game.update() à cadence constante (logique = 30*SPEED Hz ; tick() fait la
+        // logique 1 appel/2). On s'arrête net si on quitte le jeu ou change de niveau en cours de boucle.
+        acc += Math.min(tpf, 0.25f);
         int steps = 0;
-        while (acc >= TICK_DT && steps < 6) { scene.tick(); acc -= TICK_DT; steps++; }
-        // MOUSELOOK : souris droite (DX>0) → ob_rot augmente → vue tourne à droite (cf. rotplayer).
-        if (mouseDX != 0f) {
-            int d16 = (int) (mouseDX * MOUSE_SENS * 65536f);   // unités-rot 16.16 (256 = tour complet)
-            Mem.wl(scene.player + Defs.ob_rot, Mem.l(scene.player + Defs.ob_rot) + d16);
+        LevelScene before = game.scene;
+        while (acc >= TICK_DT && steps < 6) {
+            game.update(fire);
+            acc -= TICK_DT; steps++;
+            if (game.phase != Game.Phase.PLAYING || game.scene != before) break;
+        }
+
+        // changement de niveau → (re)construit la géométrie 3D
+        if (game.phase == Game.Phase.PLAYING && game.scene != null && game.scene != lastScene) {
+            scene = lastScene = game.scene;
+            loadLevelGeometry();
+        }
+
+        playing = game.phase == Game.Phase.PLAYING && game.scene != null;
+        if (playing) {
+            scene = game.scene;
+            // MOUSELOOK : souris droite (DX>0) → ob_rot augmente → vue tourne à droite (cf. rotplayer).
+            if (mouseDX != 0f) {
+                Mem.wl(scene.player + Defs.ob_rot, Mem.l(scene.player + Defs.ob_rot)
+                        + (int) (mouseDX * MOUSE_SENS * 65536f));
+                mouseDX = 0f;
+            }
+            Mem.wl(Vars.memat, Mem.l(Vars.memory));
+            Objects.calcscene(scene.player);            // vars caméra (sélection de frame 8-dir)
+            updateCamera();
+            rebuildWalls();                             // portes/rotpolys/morphs : géométrie suit la simu
+            updateMuzzle();
+            updateEnemies();
+            updateBulletLights();                       // balles → lumières dynamiques (murs + ennemis)
+            renderGore();                               // décals de gore au sol (gibs retombés)
+            updateHud();
+            updateDamageFx();                           // flash rouge (coups) + rouge mort
+        } else {
+            game.render();                              // histoire / game over → framebuffer 2D
+            uploadStoryFramebuffer();
             mouseDX = 0f;
         }
-        // cam vars de la simu (pour la sélection de frame 8-directions) + caméra 3D
-        Mem.wl(Vars.memat, Mem.l(Vars.memory));
-        Objects.calcscene(scene.player);
-        updateCamera();
-        rebuildWalls();                                 // portes/rotpolys/morphs : géométrie suit la simu
-        updateMuzzle();
-        updateEnemies();
-        updateBulletLights();                           // balles → lumières dynamiques (murs + ennemis)
-        renderGore();                                   // décals de gore au sol (gibs retombés)
-        updateHud();
-        updateDamageFx();                               // flash rouge (coups) + rouge mort
+        showWorld(playing);                             // bascule monde 3D ↔ overlay 2D
         if (audio != null) audio.updateMusic();         // pompe le streaming MED (thread principal)
+    }
+
+    /** Bascule l'affichage : monde 3D + HUD (en jeu) ou overlay 2D plein écran (histoire / game over). */
+    private void showWorld(boolean playing) {
+        Spatial.CullHint world = playing ? Spatial.CullHint.Inherit : Spatial.CullHint.Always;
+        walls.setCullHint(world);
+        enemies.setCullHint(world);
+        goreNode.setCullHint(world);
+        if (floorGeom != null) floorGeom.setCullHint(world);
+        if (ceilGeom != null) ceilGeom.setCullHint(world);
+        hpBar.setCullHint(world);
+        hudText.setCullHint(playing ? Spatial.CullHint.Inherit : Spatial.CullHint.Always);
+        if (!playing) redOverlay.setCullHint(Spatial.CullHint.Always);
+        storyQuad.setCullHint(playing ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
+    }
+
+    /** Convertit le framebuffer 2D de Game ($0RGB) en texture de l'overlay plein écran. */
+    private void uploadStoryFramebuffer() {
+        int fb = Mem.l(Vars.cop);
+        for (int y = 0; y < FB_H; y++)
+            for (int x = 0; x < FB_W; x++) {
+                int c = Mem.uw(fb + (y * FB_W + x) * 2) & 0x0fff;
+                int dst = ((FB_H - 1 - y) * FB_W + x) * 4;   // flip V (guiNode : origine en bas)
+                storyBuf.put(dst, (byte) (((c >> 8) & 15) * 17))
+                        .put(dst + 1, (byte) (((c >> 4) & 15) * 17))
+                        .put(dst + 2, (byte) ((c & 15) * 17)).put(dst + 3, (byte) 0xff);
+            }
+        storyImg.setUpdateNeeded();
     }
 
     /** Flash de bouche : relance l'intensité au front montant du tir, puis décroissance rapide. */
@@ -541,9 +630,27 @@ public final class Rebirth extends SimpleApplication {
 
     // ----------------------------------------------------------------- niveau (murs/sol/plafond)
 
-    private void buildLevel() {
+    /**
+     * (Re)construit toute la géométrie du niveau COURANT. Appelé à chaque changement de niveau par le
+     * séquenceur Game. Purge d'abord le niveau précédent (caches palette-dépendants, lumières, sol/plafond),
+     * car palette et textures diffèrent par niveau.
+     */
+    private void loadLevelGeometry() {
+        // --- purge du niveau précédent ---
+        walls.detachAllChildren();
+        enemies.detachAllChildren();
+        goreNode.detachAllChildren();
+        spritePool.clear();
+        if (floorGeom != null) { floorGeom.removeFromParent(); floorGeom = null; }
+        if (ceilGeom != null) { ceilGeom.removeFromParent(); ceilGeom = null; }
+        for (PointLight pl : levelLights) rootNode.removeLight(pl);
+        levelLights.clear();
+        wallTexCache.clear(); wallMatCache.clear(); seeThroughTex.clear();
+        texLight.clear(); wallTexBase.clear(); slotOfBase.clear(); spriteCache.clear();
+
+        // --- construit le nouveau niveau ---
         captureAnimFrames();                                       // identité des frames d'anim (pour le HD)
-        Map<Integer, List<float[]>> byTex = collectWalls();        // état initial (bornes + lumières)
+        Map<Integer, List<float[]>> byTex = collectWalls();
         float minX = 1e9f, maxX = -1e9f, minZ = 1e9f, maxZ = -1e9f;
         for (var list : byTex.values())
             for (float[] w : list) {
@@ -551,12 +658,10 @@ public final class Rebirth extends SimpleApplication {
                 minZ = Math.min(minZ, Math.min(w[1], w[3])); maxZ = Math.max(maxZ, Math.max(w[1], w[3]));
             }
         for (Integer t : byTex.keySet()) wallTexture(t);            // précharge (remplit seeThroughTex/texLight)
-
-        rootNode.attachChild(walls);
         rebuildWalls();                                            // 1er build (puis chaque frame → portes animées)
 
-        if (Mem.l(Vars.floor) != 0) rootNode.attachChild(plane("floor", minX, maxX, minZ, maxZ, 0, tileTexture(Mem.l(Vars.floor), "floor")));
-        if (Mem.l(Vars.roof) != 0) rootNode.attachChild(plane("ceil", minX, maxX, minZ, maxZ, WALL_H, tileTexture(Mem.l(Vars.roof), "roof")));
+        if (Mem.l(Vars.floor) != 0) { floorGeom = plane("floor", minX, maxX, minZ, maxZ, 0, tileTexture(Mem.l(Vars.floor), "floor")); rootNode.attachChild(floorGeom); }
+        if (Mem.l(Vars.roof) != 0) { ceilGeom = plane("ceil", minX, maxX, minZ, maxZ, WALL_H, tileTexture(Mem.l(Vars.roof), "roof")); rootNode.attachChild(ceilGeom); }
 
         // point lights sur les murs à texture ÉMISSIVE (panneaux/écrans lumineux) — texLight rempli
         // pendant wallTexture(). Dédoublonnage par cellule de grille + plafonné (perf single-pass).
@@ -573,6 +678,7 @@ public final class Rebirth extends SimpleApplication {
                 PointLight pl = new PointLight(new Vector3f(-cx * S, WALL_H * 0.45f, cz * S),   // X miroir
                         new ColorRGBA(col[0], col[1], col[2], 1f).mult(2.2f), 520f * S);
                 rootNode.addLight(pl);
+                levelLights.add(pl);                   // suivi pour retrait au changement de niveau
                 added++;
             }
         }
