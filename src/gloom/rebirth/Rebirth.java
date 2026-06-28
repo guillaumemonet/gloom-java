@@ -134,7 +134,8 @@ public final class Rebirth extends SimpleApplication {
         flyCam.setEnabled(false);                      // caméra pilotée par la simulation
         setDisplayStatView(false);                     // pas de stats de debug JME
         setDisplayFps(true);                           // compteur FPS (diagnostic de fluidité)
-        inputManager.setCursorVisible(false);          // souris capturée (mouselook FPS)
+        inputManager.setCursorVisible(false);
+        grabCursor();                                  // VERROUILLE la souris dans la fenêtre (mouselook FPS)
         // textures HD optionnelles : PNG dans <cwd>/hd/ (cwd = dépôt assets). Repli sur le procédural.
         assetManager.registerLocator(".", FileLocator.class);
 
@@ -181,6 +182,17 @@ public final class Rebirth extends SimpleApplication {
         if (!HEADLESS) initAudio();                    // SFX (Paula→OpenAL) + musique MED
         if (HEADLESS) { spawnDemoEnemy(); attachScreenshot(); }
         updateCamera();
+    }
+
+    /**
+     * Verrouille le curseur dans la fenêtre (GLFW_CURSOR_DISABLED = caché + mode relatif illimité).
+     * setCursorVisible(false) ne fait que masquer → le curseur pouvait sortir et cliquer ailleurs.
+     * glfwGetCurrentContext() = la fenêtre JME (son contexte GL est courant sur ce thread de rendu).
+     */
+    private void grabCursor() {
+        long win = org.lwjgl.glfw.GLFW.glfwGetCurrentContext();
+        if (win != 0L) org.lwjgl.glfw.GLFW.glfwSetInputMode(win,
+                org.lwjgl.glfw.GLFW.GLFW_CURSOR, org.lwjgl.glfw.GLFW.GLFW_CURSOR_DISABLED);
     }
 
     private void initAudio() {

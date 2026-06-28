@@ -84,6 +84,16 @@ tasks.register('rebirth', JavaExec) {
     systemProperties System.getProperties().subMap(['shot', 'map', 'tile', 'speed', 'mousesens'])
 }
 
+// Extrait les textures d'un niveau en PNG (base) → hd_src/, pour l'upscale IA (scripts/upscale-textures.py).
+tasks.register('dumpTextures', JavaExec) {
+    group = 'application'
+    description = 'Extrait les textures du niveau en PNG (base) → hd_src/ (entrée de l\'upscale HD)'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.TextureDump'
+    workingDir = assetRoot
+    systemProperties System.getProperties().subMap(['map', 'tile', 'out'])
+}
+
 // Lance la VARIANTE gloom2.s (planaire/AGA : focshft 7 + castrots128). Même jeu, projection
 // « Deluxe ». Équivaut à `gradle run -Dengine=gloom2`.
 tasks.register('run2', JavaExec) {
