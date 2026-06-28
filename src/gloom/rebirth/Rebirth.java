@@ -78,6 +78,8 @@ public final class Rebirth extends SimpleApplication {
 
     private LevelScene scene;
     private final Node enemies = new Node("enemies");
+    private final Node walls = new Node("walls");                    // murs reconstruits chaque frame (portes animées)
+    private final Map<Integer, Material> wallMatCache = new HashMap<>();
     private final Map<Integer, Texture2D> wallTexCache = new HashMap<>();
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
     private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
@@ -114,8 +116,8 @@ public final class Rebirth extends SimpleApplication {
     @Override
     public void simpleInitApp() {
         flyCam.setEnabled(false);                      // caméra pilotée par la simulation
-        setDisplayStatView(false);                     // pas de stats/FPS de debug JME
-        setDisplayFps(false);
+        setDisplayStatView(false);                     // pas de stats de debug JME
+        setDisplayFps(true);                           // compteur FPS (diagnostic de fluidité)
 
         scene = new LevelScene();
         scene.init(320, 240, MAP, TILE);
@@ -130,7 +132,9 @@ public final class Rebirth extends SimpleApplication {
         rootNode.addLight(sun);
         rootNode.addLight(new AmbientLight(ColorRGBA.White.mult(0.22f)));
         viewPort.setBackgroundColor(new ColorRGBA(0.02f, 0.02f, 0.04f, 1f));
-        cam.setFrustumFar(6000f);
+        // plan near PROCHE : sans ça, en s'approchant d'un mur le polygone croise le plan near et
+        // se fait clipper (le mur « disparaît » de près). near 0.05 = ~3 unités gloom.
+        cam.setFrustumPerspective(45f, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f);
 
         // single-pass : permet plusieurs point lights en une passe (perf)
         renderManager.setPreferredLightMode(TechniqueDef.LightMode.SinglePass);
@@ -176,7 +180,7 @@ public final class Rebirth extends SimpleApplication {
     /** Brouillard d'ambiance (« Gloom » !) + ombres directionnelles. */
     private void setupPostFx(DirectionalLight sun) {
         rootNode.setShadowMode(ShadowMode.CastAndReceive);
-        DirectionalLightShadowRenderer dlsr = new DirectionalLightShadowRenderer(assetManager, 1024, 2);
+        DirectionalLightShadowRenderer dlsr = new DirectionalLightShadowRenderer(assetManager, 512, 1);
         dlsr.setLight(sun);
         dlsr.setShadowIntensity(0.4f);
         viewPort.addProcessor(dlsr);
@@ -233,6 +237,7 @@ public final class Rebirth extends SimpleApplication {
         Mem.wl(Vars.memat, Mem.l(Vars.memory));
         Objects.calcscene(scene.player);
         updateCamera();
+        rebuildWalls();                                 // portes/rotpolys/morphs : géométrie suit la simu
         updateMuzzle();
         updateEnemies();
         updateHud();
@@ -290,6 +295,9 @@ public final class Rebirth extends SimpleApplication {
         float ox = (short) Mem.w(obj + Defs.ob_x), oy = (short) Mem.w(obj + Defs.ob_y), oz = (short) Mem.w(obj + Defs.ob_z);
         // ancre : le pixel (xh,yh) du sprite est posé sur (ox,oy) ; billboard centré horizontalement
         float centerY = -(oy + (h * 0.5f - yh) * scale / 256f) * S;
+        // en 3D le sol est un plan réel (y=0) : un sprite à ancre centrée posé au sol traverserait le
+        // plancher (moitié basse sous le sol). On remonte le billboard pour qu'il repose dessus.
+        if (centerY - wH / 2f < 0f) centerY = wH / 2f;
 
         Geometry g = spriteSlot(slot);
         g.getMaterial().setTexture("ColorMap", tex);
@@ -365,36 +373,18 @@ public final class Rebirth extends SimpleApplication {
     // ----------------------------------------------------------------- niveau (murs/sol/plafond)
 
     private void buildLevel() {
-        int grid = Mem.l(Vars.map_grid), ppnt = Mem.l(Vars.map_ppnt), poly = Mem.l(Vars.map_poly);
-        Set<Integer> zones = new HashSet<>();
-        for (int cell = 0; cell < 32 * 32; cell++) {
-            int a0 = grid + cell * 8;
-            int num = Mem.w(a0);
-            if (num < 0) continue;
-            int pp = ppnt + Mem.uw(a0 + 2) * 2;
-            for (int i = 0; i <= num; i++) { zones.add(Mem.uw(pp)); pp += 2; }
-        }
-        Map<Integer, List<float[]>> byTex = new HashMap<>();
+        Map<Integer, List<float[]>> byTex = collectWalls();        // état initial (bornes + lumières)
         float minX = 1e9f, maxX = -1e9f, minZ = 1e9f, maxZ = -1e9f;
-        for (int z : zones) {
-            int zb = poly + z * Defs.zo_size;
-            float lx = (short) Mem.w(zb + Defs.zo_lx), lz = (short) Mem.w(zb + Defs.zo_lz);
-            float rx = (short) Mem.w(zb + Defs.zo_rx), rz = (short) Mem.w(zb + Defs.zo_rz);
-            byTex.computeIfAbsent(Mem.ub(zb + Defs.zo_t), k -> new ArrayList<>()).add(new float[]{lx, lz, rx, rz});
-            minX = Math.min(minX, Math.min(lx, rx)); maxX = Math.max(maxX, Math.max(lx, rx));
-            minZ = Math.min(minZ, Math.min(lz, rz)); maxZ = Math.max(maxZ, Math.max(lz, rz));
-        }
-        for (var e : byTex.entrySet()) {
-            Texture2D tex = wallTexture(e.getKey());       // (remplit seeThroughTex / texLight au passage)
-            Geometry wg = new Geometry("walls_" + e.getKey(), wallMesh(e.getValue()));
-            Material m = litTextured(tex, true);
-            if (seeThroughTex.contains(e.getKey())) {       // grille/porte ajourée : alpha discard + pas d'ombre pleine
-                m.setFloat("AlphaDiscardThreshold", 0.5f);
-                wg.setShadowMode(ShadowMode.Receive);
+        for (var list : byTex.values())
+            for (float[] w : list) {
+                minX = Math.min(minX, Math.min(w[0], w[2])); maxX = Math.max(maxX, Math.max(w[0], w[2]));
+                minZ = Math.min(minZ, Math.min(w[1], w[3])); maxZ = Math.max(maxZ, Math.max(w[1], w[3]));
             }
-            wg.setMaterial(m);
-            rootNode.attachChild(wg);
-        }
+        for (Integer t : byTex.keySet()) wallTexture(t);            // précharge (remplit seeThroughTex/texLight)
+
+        rootNode.attachChild(walls);
+        rebuildWalls();                                            // 1er build (puis chaque frame → portes animées)
+
         if (Mem.l(Vars.floor) != 0) rootNode.attachChild(plane("floor", minX, maxX, minZ, maxZ, 0, tileTexture(Mem.l(Vars.floor))));
         if (Mem.l(Vars.roof) != 0) rootNode.attachChild(plane("ceil", minX, maxX, minZ, maxZ, WALL_H, tileTexture(Mem.l(Vars.roof))));
 
@@ -416,6 +406,48 @@ public final class Rebirth extends SimpleApplication {
                 added++;
             }
         }
+    }
+
+    /** Énumère les zones (segments de mur) via la grille et lit leurs coordonnées COURANTES, groupées
+     *  par texture. Comme dodoors/dorots modifient zo_lx..zo_rz, relire chaque frame anime la géométrie. */
+    private Map<Integer, List<float[]>> collectWalls() {
+        int grid = Mem.l(Vars.map_grid), ppnt = Mem.l(Vars.map_ppnt), poly = Mem.l(Vars.map_poly);
+        Set<Integer> zones = new HashSet<>();
+        for (int cell = 0; cell < 32 * 32; cell++) {
+            int a0 = grid + cell * 8;
+            int num = Mem.w(a0);
+            if (num < 0) continue;
+            int pp = ppnt + Mem.uw(a0 + 2) * 2;
+            for (int i = 0; i <= num; i++) { zones.add(Mem.uw(pp)); pp += 2; }
+        }
+        Map<Integer, List<float[]>> byTex = new HashMap<>();
+        for (int z : zones) {
+            int zb = poly + z * Defs.zo_size;
+            float lx = (short) Mem.w(zb + Defs.zo_lx), lz = (short) Mem.w(zb + Defs.zo_lz);
+            float rx = (short) Mem.w(zb + Defs.zo_rx), rz = (short) Mem.w(zb + Defs.zo_rz);
+            byTex.computeIfAbsent(Mem.ub(zb + Defs.zo_t), k -> new ArrayList<>()).add(new float[]{lx, lz, rx, rz});
+        }
+        return byTex;
+    }
+
+    /** Reconstruit les meshes de murs depuis l'état COURANT des zones (appelé chaque frame). */
+    private void rebuildWalls() {
+        walls.detachAllChildren();
+        for (var e : collectWalls().entrySet()) {
+            Geometry wg = new Geometry("w" + e.getKey(), wallMesh(e.getValue()));
+            wg.setMaterial(wallMaterial(e.getKey()));
+            if (seeThroughTex.contains(e.getKey())) wg.setShadowMode(ShadowMode.Receive);   // grille ajourée
+            walls.attachChild(wg);
+        }
+    }
+
+    /** Matériau de mur (caché par texture) : Lighting.j3md + alpha discard si texture ajourée. */
+    private Material wallMaterial(int tex) {
+        return wallMatCache.computeIfAbsent(tex, k -> {
+            Material m = litTextured(wallTexture(k), true);        // wallTexture() remplit seeThroughTex avant le test
+            if (seeThroughTex.contains(k)) m.setFloat("AlphaDiscardThreshold", 0.5f);
+            return m;
+        });
     }
 
     private Mesh wallMesh(List<float[]> walls) {
