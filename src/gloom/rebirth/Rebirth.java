@@ -85,8 +85,10 @@ public final class Rebirth extends SimpleApplication {
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
     private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
     private final Set<Integer> seeThroughTex = new HashSet<>();      // textures à colonnes ajourées (grilles/portes)
-    private static final float TICK_DT = 1f / 60f;                  // simu à cadence FIXE (indépendante du fps)
-    private float acc;                                              // accumulateur de temps pour le pas fixe
+    private static final float SPEED = Float.parseFloat(System.getProperty("speed", "2.0"));  // boost de vitesse (-Dspeed)
+    private static final float TICK_DT = 1f / (60f * SPEED);       // cadence FIXE : logique 30*SPEED Hz (indépendante du fps)
+    private float acc;                                             // accumulateur de temps pour le pas fixe
+    private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)
     private PointLight torch;                                        // lumière portée par le joueur
     private PointLight muzzle;                                       // flash de bouche (tir)
     private float flash;                                             // intensité du flash (décroît)
@@ -233,11 +235,11 @@ public final class Rebirth extends SimpleApplication {
         int joys = (kStrafeL || kStrafeR) ? -1 : 0;
         int joyx = joys != 0 ? (kStrafeL ? -1 : 1) : (kLeft ? -1 : (kRight ? 1 : 0));
         scene.setInput(joyx, joyy, kFire ? -1 : 0, joys);
-        // pas de temps FIXE : tick() à 60 Hz quel que soit le framerate de rendu (la logique tourne
-        // 1 frame sur 2 = 30 Hz comme l'original). Sinon une chute de fps en 3D ralentit le jeu.
+        // pas de temps FIXE : tick() à cadence constante quel que soit le framerate (logique = 30*SPEED Hz ;
+        // tick() ne fait la logique qu'1 appel sur 2). SPEED>1 → jeu plus rapide que l'original.
         acc += Math.min(tpf, 0.25f);                    // cap anti-spirale de la mort
         int steps = 0;
-        while (acc >= TICK_DT && steps < 4) { scene.tick(); acc -= TICK_DT; steps++; }
+        while (acc >= TICK_DT && steps < 6) { scene.tick(); acc -= TICK_DT; steps++; }
         // cam vars de la simu (pour la sélection de frame 8-directions) + caméra 3D
         Mem.wl(Vars.memat, Mem.l(Vars.memory));
         Objects.calcscene(scene.player);
@@ -483,7 +485,9 @@ public final class Rebirth extends SimpleApplication {
     /** Reconstruit les meshes de murs depuis l'état COURANT des zones (appelé chaque frame). */
     private void rebuildWalls() {
         walls.detachAllChildren();
-        for (var e : collectWalls().entrySet()) {
+        Map<Integer, List<float[]>> byTex = collectWalls();
+        refreshAnimatedTextures(byTex.keySet());                   // textures animées : reconstruit si le pointeur a changé
+        for (var e : byTex.entrySet()) {
             Geometry wg = new Geometry("w" + e.getKey(), wallMesh(e.getValue()));
             wg.setMaterial(wallMaterial(e.getKey()));
             if (seeThroughTex.contains(e.getKey())) wg.setShadowMode(ShadowMode.Receive);   // grille ajourée
@@ -498,6 +502,22 @@ public final class Rebirth extends SimpleApplication {
             if (seeThroughTex.contains(k)) m.setFloat("AlphaDiscardThreshold", 0.5f);
             return m;
         });
+    }
+
+    /**
+     * Textures animées : doanims (gloom.s:1942) fait tourner les POINTEURS de la table `textures`
+     * (le numéro reste, mais textures[n] pointe vers la frame suivante). On détecte ce changement
+     * de pointeur et on invalide le cache → la texture est reconstruite avec les nouveaux pixels.
+     */
+    private void refreshAnimatedTextures(Set<Integer> usedTex) {
+        for (Integer n : usedTex) {
+            Integer built = wallTexBase.get(n);
+            if (built != null && built != Mem.l(Vars.textures + n * 4)) {  // pointeur changé → frame suivante
+                wallTexCache.remove(n);
+                wallMatCache.remove(n);
+                wallTexBase.remove(n);                 // wallTexture() les repeuplera à la reconstruction
+            }
+        }
     }
 
     private Mesh wallMesh(List<float[]> walls) {
@@ -579,6 +599,7 @@ public final class Rebirth extends SimpleApplication {
             if (holed) seeThroughTex.add(k);
             if (bright > 64 * 64 * 0.045f)                 // >4,5% de pixels brillants → texture émissive
                 texLight.put(k, new float[]{br / (bright * 255f), bg / (bright * 255f), bb / (bright * 255f)});
+            wallTexBase.put(k, base);                      // mémorise le pointeur pixels (détection d'animation)
             return makeTex(buf, 64, 64);
         });
     }
