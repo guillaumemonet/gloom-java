@@ -35,8 +35,11 @@ public final class TextureDump {
         dir.mkdirs();
         int rgbs = Mem.l(Vars.map_rgbs);
 
+        Set<Integer> texNums = usedTextures();           // textures référencées par les zones
+        texNums.addAll(animatedSlots());                 // + toutes les frames d'animation (sinon manquantes)
+
         int n = 0;
-        for (int t : usedTextures()) {                   // textures de murs réellement référencées
+        for (int t : texNums) {
             int base = Mem.l(Vars.textures + t * 4);
             if (base == 0) continue;
             BufferedImage img = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
@@ -68,6 +71,20 @@ public final class TextureDump {
             }
         }
         return tex;
+    }
+
+    /** Slots des plages d'animation (doanims) : chaque frame est une entrée distincte de textures[]. */
+    private static Set<Integer> animatedSlots() {
+        Set<Integer> slots = new TreeSet<>();
+        int a0 = Mem.l(Vars.map_anim);
+        if (a0 == 0) return slots;
+        while (true) {
+            int frames = Mem.uw(a0); a0 += 2;
+            if (frames == 0) break;
+            int first = Mem.uw(a0); a0 += 6;             // [premier(2)][delai(2)][compteur(2)]
+            for (int k = 0; k < frames; k++) slots.add(first + k);
+        }
+        return slots;
     }
 
     private static void dumpTile(int base, int rgbs, File f) throws IOException {

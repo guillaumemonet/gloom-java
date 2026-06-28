@@ -95,6 +95,7 @@ public final class Rebirth extends SimpleApplication {
     private static final float TICK_DT = 1f / (60f * SPEED);       // cadence FIXE : logique 30*SPEED Hz (indépendante du fps)
     private float acc;                                             // accumulateur de temps pour le pas fixe
     private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)
+    private final Map<Integer, Integer> slotOfBase = new HashMap<>();    // pointeur pixels initial → slot (= frame d'anim) pour le HD
     private PointLight torch;                                        // lumière portée par le joueur
     private PointLight muzzle;                                       // flash de bouche (tir)
     private static final int BULLET_LIGHTS = 6;                     // pool de lumières dynamiques des balles
@@ -534,6 +535,7 @@ public final class Rebirth extends SimpleApplication {
     // ----------------------------------------------------------------- niveau (murs/sol/plafond)
 
     private void buildLevel() {
+        captureAnimFrames();                                       // identité des frames d'anim (pour le HD)
         Map<Integer, List<float[]>> byTex = collectWalls();        // état initial (bornes + lumières)
         float minX = 1e9f, maxX = -1e9f, minZ = 1e9f, maxZ = -1e9f;
         for (var list : byTex.values())
@@ -710,9 +712,36 @@ public final class Rebirth extends SimpleApplication {
                 texLight.put(k, new float[]{br / (bright * 255f), bg / (bright * 255f), bb / (bright * 255f)});
             wallTexBase.put(k, base);                      // mémorise le pointeur pixels (détection d'animation)
             Texture2D proc = makeTex(buf, 64, 64);
-            Texture2D hd = loadHd("hd/wall_" + k + ".png");   // PNG HD optionnel → sinon procédural
+            // HD : indexé par la FRAME courante (slot d'anim), pas le numéro de zone — sinon une texture
+            // animée afficherait une seule frame HD figée. hdNumberFor() résout le pointeur courant → slot.
+            Texture2D hd = loadHd("hd/wall_" + hdNumberFor(k) + ".png");
             return hd != null ? hd : proc;
         });
+    }
+
+    /**
+     * Capture l'identité des frames d'animation : doanims (gloom.s:1942) fait tourner les pointeurs de
+     * textures[] sur des plages [premier..premier+N-1] (chaque entrée = une frame). On enregistre le
+     * pointeur INITIAL de chaque slot → son numéro, pour pouvoir charger le bon hd/wall_&lt;slot&gt;.png.
+     */
+    private void captureAnimFrames() {
+        int a0 = Mem.l(Vars.map_anim);
+        if (a0 == 0) return;
+        while (true) {
+            int frames = Mem.uw(a0); a0 += 2;
+            if (frames == 0) break;
+            int first = Mem.uw(a0); a0 += 6;            // [premier(2)][delai(2)][compteur(2)]
+            for (int k = 0; k < frames; k++) {
+                int slot = first + k;
+                slotOfBase.put(Mem.l(Vars.textures + slot * 4), slot);   // pointeur initial → slot
+            }
+        }
+    }
+
+    /** Numéro de frame HD pour la texture n : son pointeur courant → slot d'anim (sinon n lui-même). */
+    private int hdNumberFor(int n) {
+        Integer slot = slotOfBase.get(Mem.l(Vars.textures + n * 4));
+        return slot != null ? slot : n;
     }
 
     /** Charge une texture HD optionnelle depuis &lt;cwd&gt;/hd/ ; null si absente (→ repli procédural). */
