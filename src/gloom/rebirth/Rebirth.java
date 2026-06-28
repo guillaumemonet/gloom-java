@@ -38,12 +38,14 @@ import com.jme3.texture.image.ColorSpace;
 import com.jme3.util.BufferUtils;
 import com.jme3.util.Screenshots;
 
+import gloom.Assets;
 import gloom.Defs;
-import gloom.Lists;
 import gloom.Mem;
 import gloom.Objects;
+import gloom.Sfx;
 import gloom.Vars;
 import gloom.data.ObjInfo;
+import gloom.host.Audio;
 import gloom.host.LevelScene;
 
 import javax.imageio.ImageIO;
@@ -82,6 +84,8 @@ public final class Rebirth extends SimpleApplication {
     // HUD
     private Geometry hpBar;
     private BitmapText hudText;
+    // audio (réutilise la pile host.Audio + MedPlayer + Sfx du port 2D ; JME audio désactivé)
+    private Audio audio;
 
     public static void main(String[] args) {
         Rebirth app = new Rebirth();
@@ -89,6 +93,7 @@ public final class Rebirth extends SimpleApplication {
         s.setResolution(960, 720);
         s.setTitle("Gloom Rebirth (3D)");
         s.setVSync(true);
+        s.setAudioRenderer(null);          // pas d'audio JME : on garde la pile OpenAL de host.Audio
         app.setSettings(s);
         app.setShowSettings(false);
         app.start();
@@ -117,8 +122,31 @@ public final class Rebirth extends SimpleApplication {
         setupPostFx(sun);
         setupHud();
         bindKeys();
+        if (!HEADLESS) initAudio();                    // SFX (Paula→OpenAL) + musique MED
         if (HEADLESS) { spawnDemoEnemy(); attachScreenshot(); }
         updateCamera();
+    }
+
+    private void initAudio() {
+        try {
+            Sfx.loadSamples();
+            audio = new Audio();
+            Sfx.setSink(audio);
+            audio.playMusic(loadModule("sfxs/med1"));
+        } catch (Throwable t) {
+            System.err.println("[Rebirth] audio indisponible : " + t);
+            audio = null;
+        }
+    }
+
+    private static byte[] loadModule(String name) {
+        try { return Assets.read(name); } catch (Exception e) { return null; }
+    }
+
+    @Override
+    public void destroy() {
+        if (audio != null) audio.shutdown();
+        super.destroy();
     }
 
     /** Brouillard d'ambiance (« Gloom » !) + ombres directionnelles. */
@@ -179,6 +207,7 @@ public final class Rebirth extends SimpleApplication {
         updateCamera();
         updateEnemies();
         updateHud();
+        if (audio != null) audio.updateMusic();         // pompe le streaming MED (thread principal)
     }
 
     private void updateCamera() {
