@@ -82,6 +82,11 @@ public final class Rebirth extends SimpleApplication {
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
     private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
     private PointLight torch;                                        // lumière portée par le joueur
+    private PointLight muzzle;                                       // flash de bouche (tir)
+    private float flash;                                             // intensité du flash (décroît)
+    private boolean prevFire;                                        // front montant du tir
+    private final List<Geometry> spritePool = new ArrayList<>();     // billboards réutilisés (pas de GC/frame)
+    private Mesh unitQuad;                                           // quad unité partagé (mis à l'échelle)
     private int frame;
     // état des contrôles (held)
     private boolean kFwd, kBack, kLeft, kRight, kStrafeL, kStrafeR, kFire;
@@ -131,6 +136,9 @@ public final class Rebirth extends SimpleApplication {
         // torche du joueur (suit la caméra) — éclaire la zone proche dans le noir/brouillard
         torch = new PointLight(new Vector3f(), ColorRGBA.White.mult(1.6f), 1100f * S);
         rootNode.addLight(torch);
+        // flash de bouche (éteint au repos ; pulse à chaque tir)
+        muzzle = new PointLight(new Vector3f(), ColorRGBA.Black, 900f * S);
+        rootNode.addLight(muzzle);
 
         setupPostFx(sun);
         setupHud();
@@ -218,9 +226,19 @@ public final class Rebirth extends SimpleApplication {
         Mem.wl(Vars.memat, Mem.l(Vars.memory));
         Objects.calcscene(scene.player);
         updateCamera();
+        updateMuzzle();
         updateEnemies();
         updateHud();
         if (audio != null) audio.updateMusic();         // pompe le streaming MED (thread principal)
+    }
+
+    /** Flash de bouche : relance l'intensité au front montant du tir, puis décroissance rapide. */
+    private void updateMuzzle() {
+        if (kFire && !prevFire) flash = 1f;              // nouveau tir → flash plein
+        prevFire = kFire;
+        flash *= 0.55f;                                   // décroissance (~3-4 frames visibles)
+        muzzle.setColor(new ColorRGBA(1f, 0.85f, 0.55f, 1f).mult(flash * 2.4f));   // orangé
+        muzzle.setPosition(cam.getLocation().add(cam.getDirection().mult(40f * S)));
     }
 
     private void updateCamera() {
@@ -237,22 +255,25 @@ public final class Rebirth extends SimpleApplication {
     // ----------------------------------------------------------------- ennemis (billboards)
 
     private void updateEnemies() {
-        enemies.detachAllChildren();
+        int used = 0;
         int o = Mem.l(Vars.objects);
         while (Mem.l(o) != 0) {                        // parcourt la liste chaînée des objets
-            if (o != scene.player) addBillboard(o);
+            if (o != scene.player && placeBillboard(used, o)) used++;
             o = Mem.l(o);
         }
+        for (int i = used; i < spritePool.size(); i++)   // masque les billboards en surplus (pool)
+            spritePool.get(i).setCullHint(Spatial.CullHint.Always);
     }
 
-    private void addBillboard(int obj) {
+    /** Configure (en le réutilisant depuis le pool) le billboard d'indice {@code slot} pour l'objet. */
+    private boolean placeBillboard(int slot, int obj) {
         int shape = Mem.l(obj + Defs.ob_shape);
-        if (shape == 0) return;
+        if (shape == 0) return false;
         int frameOff = currentFrame(obj, shape);
         int fb = shape + frameOff;
-        int xh = (short) Mem.w(fb), yh = (short) Mem.w(fb + 2);
+        int yh = (short) Mem.w(fb + 2);
         int w = Mem.uw(fb + 4), h = Mem.uw(fb + 6);
-        if (w <= 0 || h <= 0 || w > 256 || h > 256) return;
+        if (w <= 0 || h <= 0 || w > 256 || h > 256) return false;
         int scale = (Mem.l(obj + Defs.ob_render) == Objects.R_DRAWSHAPE_8) ? Mem.uw(obj + Defs.ob_scale) : 0x200;
 
         Texture2D tex = spriteCache.computeIfAbsent(fb, k -> spriteTexture(fb));
@@ -261,15 +282,28 @@ public final class Rebirth extends SimpleApplication {
         // ancre : le pixel (xh,yh) du sprite est posé sur (ox,oy) ; billboard centré horizontalement
         float centerY = -(oy + (h * 0.5f - yh) * scale / 256f) * S;
 
-        Geometry g = new Geometry("spr", quadMesh(wW, wH));
-        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-        mat.setTexture("ColorMap", tex);
-        mat.setFloat("AlphaDiscardThreshold", 0.5f);
-        mat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
-        g.setMaterial(mat);
+        Geometry g = spriteSlot(slot);
+        g.getMaterial().setTexture("ColorMap", tex);
+        g.setLocalScale(wW, wH, 1f);                   // quad unité mis à l'échelle (pas de Mesh recréé)
         g.setLocalTranslation(ox * S, centerY, oz * S);
-        g.addControl(new BillboardControl());          // face toujours la caméra
-        enemies.attachChild(g);
+        g.setCullHint(Spatial.CullHint.Inherit);
+        return true;
+    }
+
+    /** Renvoie le billboard du pool à cet indice, en l'allouant la première fois. */
+    private Geometry spriteSlot(int slot) {
+        while (slot >= spritePool.size()) {
+            if (unitQuad == null) unitQuad = quadMesh(1f, 1f);
+            Geometry g = new Geometry("spr", unitQuad);
+            Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+            mat.setFloat("AlphaDiscardThreshold", 0.5f);
+            mat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
+            g.setMaterial(mat);
+            g.addControl(new BillboardControl());      // face toujours la caméra
+            enemies.attachChild(g);
+            spritePool.add(g);
+        }
+        return spritePool.get(slot);
     }
 
     /** Réplique la sélection de frame (drawshape_8 : 8 directions + anim ; sinon 1 frame). */
