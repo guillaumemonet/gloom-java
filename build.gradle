@@ -7,10 +7,12 @@ repositories {
 }
 
 ext {
-    // LWJGL 3 « moderne » (GLFW + OpenGL + OpenAL).
+    // LWJGL 3 « moderne » (GLFW + OpenGL + OpenAL) — port 2D fidèle (host.Display/Audio).
     lwjglVersion = '3.3.4'
     // Natives Windows x64 (poste de dev). Ajouter d'autres classifiers si besoin.
     lwjglNatives = 'natives-windows'
+    // jMonkeyEngine 3 — vue 3D « rebirth » (remaster). Backend LWJGL3.
+    jmeVersion = '3.6.1-stable'
 }
 
 dependencies {
@@ -25,6 +27,11 @@ dependencies {
     runtimeOnly "org.lwjgl:lwjgl-glfw::$lwjglNatives"
     runtimeOnly "org.lwjgl:lwjgl-opengl::$lwjglNatives"
     runtimeOnly "org.lwjgl:lwjgl-openal::$lwjglNatives"
+
+    // --- vue 3D rebirth (jMonkeyEngine) ---
+    implementation "org.jmonkeyengine:jme3-core:$jmeVersion"
+    implementation "org.jmonkeyengine:jme3-desktop:$jmeVersion"   // AWTLoader, Screenshots
+    runtimeOnly    "org.jmonkeyengine:jme3-lwjgl3:$jmeVersion"     // backend LWJGL3 + natives
 }
 
 // Le portage conserve la disposition src/ NetBeans existante (pas src/main/java).
@@ -64,6 +71,16 @@ def assetRoot = projectDir.parentFile
 tasks.named('run') {
     workingDir = assetRoot
     systemProperties System.getProperties().subMap(['w', 'h', 'scale', 'map', 'tile', 'engine', 'medspeed'])
+}
+
+// « Gloom Rebirth » : vue 3D (jMonkeyEngine), branche rebirth. `-Dshot` = capture rebirth.png puis quitte.
+tasks.register('rebirth', JavaExec) {
+    group = 'application'
+    description = 'Vue 3D rebirth (jMonkeyEngine)'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.rebirth.Rebirth'
+    workingDir = assetRoot
+    systemProperties System.getProperties().subMap(['shot'])
 }
 
 // Lance la VARIANTE gloom2.s (planaire/AGA : focshft 7 + castrots128). Même jeu, projection
