@@ -47,6 +47,7 @@ import gloom.Objects;
 import gloom.Sfx;
 import gloom.Vars;
 import gloom.data.ObjInfo;
+import gloom.data.Tables;
 import gloom.host.Audio;
 import gloom.host.LevelScene;
 
@@ -91,6 +92,8 @@ public final class Rebirth extends SimpleApplication {
     private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)
     private PointLight torch;                                        // lumière portée par le joueur
     private PointLight muzzle;                                       // flash de bouche (tir)
+    private static final int BULLET_LIGHTS = 6;                     // pool de lumières dynamiques des balles
+    private PointLight[] bulletLights;                              // une lumière par balle proche
     private float flash;                                             // intensité du flash (décroît)
     private boolean prevFire;                                        // front montant du tir
     private final List<Geometry> spritePool = new ArrayList<>();     // billboards réutilisés (pas de GC/frame)
@@ -154,6 +157,12 @@ public final class Rebirth extends SimpleApplication {
         // flash de bouche (éteint au repos ; pulse à chaque tir)
         muzzle = new PointLight(new Vector3f(), ColorRGBA.Black, 900f * S);
         rootNode.addLight(muzzle);
+        // pool de lumières dynamiques des balles (couleur noire = éteinte quand inutilisée)
+        bulletLights = new PointLight[BULLET_LIGHTS];
+        for (int i = 0; i < bulletLights.length; i++) {
+            bulletLights[i] = new PointLight(new Vector3f(), ColorRGBA.Black, 460f * S);
+            rootNode.addLight(bulletLights[i]);
+        }
 
         setupPostFx(sun);
         setupHud();
@@ -271,6 +280,7 @@ public final class Rebirth extends SimpleApplication {
         rebuildWalls();                                 // portes/rotpolys/morphs : géométrie suit la simu
         updateMuzzle();
         updateEnemies();
+        updateBulletLights();                           // balles → lumières dynamiques (murs + ennemis)
         renderGore();                                   // décals de gore au sol (gibs retombés)
         updateHud();
         updateDamageFx();                               // flash rouge (coups) + rouge mort
@@ -312,6 +322,41 @@ public final class Rebirth extends SimpleApplication {
             spritePool.get(i).setCullHint(Spatial.CullHint.Always);
     }
 
+    /**
+     * Balles → lumières dynamiques. Les projectiles sont reconnus par leur ob_shape (= Tables.bulletN).
+     * On affecte une PointLight du pool (couleur selon le type) à chaque balle proche ; le surplus est
+     * éteint (couleur noire). La lumière éclaire automatiquement murs et ennemis (matériaux éclairés).
+     */
+    private void updateBulletLights() {
+        int used = 0;
+        int o = Mem.l(Vars.objects);
+        while (Mem.l(o) != 0 && used < bulletLights.length) {
+            if (o != scene.player) {
+                float[] col = bulletColor(Mem.l(o + Defs.ob_shape));
+                if (col != null) {
+                    float bx = -(short) Mem.w(o + Defs.ob_x) * S;   // X miroir, comme la géométrie
+                    float bz = (short) Mem.w(o + Defs.ob_z) * S;
+                    float by = Math.max(0.15f, -(short) Mem.w(o + Defs.ob_y) * S);  // hauteur de vol
+                    bulletLights[used].setPosition(new Vector3f(bx, by, bz));
+                    bulletLights[used].setColor(new ColorRGBA(col[0], col[1], col[2], 1f).mult(2.2f));
+                    used++;
+                }
+            }
+            o = Mem.l(o);
+        }
+        for (int i = used; i < bulletLights.length; i++) bulletLights[i].setColor(ColorRGBA.Black);  // éteint
+    }
+
+    /** Couleur d'émission selon le sprite de balle (null si l'objet n'est pas un projectile). */
+    private float[] bulletColor(int shape) {
+        if (shape == Tables.bullet1) return new float[]{1f, 0.6f, 0.2f};    // joueur : orangé
+        if (shape == Tables.bullet2) return new float[]{0.4f, 1f, 0.45f};   // ghoul : vert
+        if (shape == Tables.bullet3) return new float[]{0.45f, 0.6f, 1f};   // phantom : bleu
+        if (shape == Tables.bullet4) return new float[]{1f, 0.35f, 0.2f};   // terra : rouge
+        if (shape == Tables.bullet5) return new float[]{1f, 0.5f, 0.1f};    // dragon : feu
+        return null;
+    }
+
     /** Configure (en le réutilisant depuis le pool) le billboard d'indice {@code slot} pour l'objet. */
     private boolean placeBillboard(int slot, int obj) {
         int shape = Mem.l(obj + Defs.ob_shape);
@@ -333,7 +378,7 @@ public final class Rebirth extends SimpleApplication {
         if (centerY - wH / 2f < 0f) centerY = wH / 2f;
 
         Geometry g = spriteSlot(slot);
-        g.getMaterial().setTexture("ColorMap", tex);
+        g.getMaterial().setTexture("DiffuseMap", tex);
         g.setLocalScale(wW, wH, 1f);                   // quad unité mis à l'échelle (pas de Mesh recréé)
         g.setLocalTranslation(-ox * S, centerY, oz * S);   // X miroir
         g.setCullHint(Spatial.CullHint.Inherit);
@@ -345,7 +390,12 @@ public final class Rebirth extends SimpleApplication {
         while (slot >= spritePool.size()) {
             if (unitQuad == null) unitQuad = quadMesh(1f, 1f);
             Geometry g = new Geometry("spr", unitQuad);
-            Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+            // matériau ÉCLAIRÉ (au lieu d'Unshaded) → l'ennemi reçoit la lumière des balles/torche.
+            // Ambient élevé = sprite lumineux par défaut ; les point lights ajoutent par-dessus.
+            Material mat = new Material(assetManager, "Common/MatDefs/Light/Lighting.j3md");
+            mat.setBoolean("UseMaterialColors", true);
+            mat.setColor("Ambient", ColorRGBA.White.mult(0.9f));
+            mat.setColor("Diffuse", ColorRGBA.White);
             mat.setFloat("AlphaDiscardThreshold", 0.5f);
             mat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
             g.setMaterial(mat);
