@@ -19,7 +19,7 @@ import java.util.List;
 public final class Menu {
 
     /** Action choisie par l'utilisateur. */
-    public enum Action { NONE, NEW_GAME, CONTINUE, ABOUT, EXIT }
+    public enum Action { NONE, NEW_GAME, CONTINUE, ABOUT, OPTIONS, EXIT }
 
     private static final class Entry {
         final String label; final Action action; final int checkpoint;
@@ -38,6 +38,11 @@ public final class Menu {
     public int selectedCheckpoint = 0;            // point de contrôle pour CONTINUE
 
     public void init(int w, int h) {
+        init(w, h, false);
+    }
+
+    /** {@code withOptions} ajoute l'entrée OPTIONS (mode 3D ; le 2D Classic ne l'utilise pas). */
+    public void init(int w, int h, boolean withOptions) {
         width = w; height = h;
         Render.setupFramebuffer(w, h);
         try {
@@ -52,6 +57,7 @@ public final class Menu {
         for (int i = 1; i <= unlocked && i <= labels.size(); i++) {
             entries.add(new Entry("CONTINUE FROM " + labels.get(i - 1), Action.CONTINUE, i));
         }
+        if (withOptions) entries.add(new Entry("OPTIONS", Action.OPTIONS, 0));
         entries.add(new Entry("ABOUT GLOOM", Action.ABOUT, 0));
         entries.add(new Entry("EXIT GLOOM", Action.EXIT, 0));
 

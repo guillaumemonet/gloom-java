@@ -106,15 +106,14 @@ public final class Rebirth extends SimpleApplication {
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
     private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
     private final Set<Integer> seeThroughTex = new HashSet<>();      // textures à colonnes ajourées (grilles/portes)
-    private static final float SPEED = Float.parseFloat(System.getProperty("speed", "1.0"));   // cadence SIMU (1.0=fidèle, tout le jeu)
-    private static final float TICK_DT = 1f / (60f * SPEED);       // cadence FIXE : logique 30*SPEED Hz (indépendante du fps)
+    private static final float TICK_DT = 1f / 60f;                 // cadence SIMU FIXE (1.0 = fidèle ; monstres/balles)
     private float acc;                                             // accumulateur de temps pour le pas fixe
-    // boost de DÉPLACEMENT du JOUEUR uniquement (monstres/balles inchangés) : multiplie ob_movspeed.
-    private static final float PLAYER_SPEED = Float.parseFloat(System.getProperty("playerspeed", "1.5"));
     private int playerBaseMovspeed = 13;                          // ob_movspeed (mot fort) par défaut du joueur (player1=0xd0000)
-    // FOV vertical. Le 2D (focshft 6, 320×240) projette en ~124° (2·atan(120/64)) = fish-eye EXTRÊME et
-    // coûteux en 3D GPU. Défaut 100° = large « façon Gloom » mais utilisable ; -Dfov=124 pour le match exact.
-    private static final float FOV = Float.parseFloat(System.getProperty("fov", "100"));
+    private Options opt;                                           // options 3D (affichage/contrôles/confort), persistées
+    // menu OPTIONS
+    private boolean inOptions, awaitingKey;
+    private int optRow, awaitRow, lastW, lastH;
+    private boolean pOptU, pOptD, pOptL, pOptR, pOptF, kEsc, prevEsc;
     private final Map<Integer, Integer> wallTexBase = new HashMap<>();   // texNum → pointeur pixels au build (détection anim)
     private final Map<Integer, Integer> slotOfBase = new HashMap<>();    // pointeur pixels initial → slot (= frame d'anim) pour le HD
     private PointLight torch;                                        // lumière portée par le joueur
@@ -129,7 +128,6 @@ public final class Rebirth extends SimpleApplication {
     // souris (mouselook) : delta X accumulé en PIXELS, sensibilité en unités-rot/pixel (-Dmousesens)
     private float mouseDX;
     private long glfwWindow;                                        // handle GLFW (pour verrouiller le curseur)
-    private static final float MOUSE_SENS = Float.parseFloat(System.getProperty("mousesens", "0.18"));
     // état des contrôles (held)
     private boolean kFwd, kBack, kLeft, kRight, kStrafeL, kStrafeR, kFire;
     // HUD
@@ -141,11 +139,14 @@ public final class Rebirth extends SimpleApplication {
     private Audio audio;
 
     public static void main(String[] args) {
+        Options o = Options.load();        // affichage/contrôles/confort persistés (~/.gloom-java/rebirth.properties)
         Rebirth app = new Rebirth();
+        app.opt = o;
         AppSettings s = new AppSettings(true);
-        s.setResolution(960, 720);
+        s.setResolution(o.width, o.height);
+        s.setFullscreen(o.fullscreen);
         s.setTitle("Gloom Rebirth (3D)");
-        s.setVSync(true);
+        s.setVSync(o.vsync);
         s.setAudioRenderer(null);          // pas d'audio JME : on garde la pile OpenAL de host.Audio
         app.setSettings(s);
         app.setShowSettings(false);
@@ -154,6 +155,8 @@ public final class Rebirth extends SimpleApplication {
 
     @Override
     public void simpleInitApp() {
+        if (opt == null) opt = Options.load();
+        lastW = cam.getWidth(); lastH = cam.getHeight();
         flyCam.setEnabled(false);                      // caméra pilotée par la simulation
         setDisplayStatView(false);                     // pas de stats de debug JME
         setDisplayFps(true);                           // compteur FPS (diagnostic de fluidité)
@@ -176,7 +179,7 @@ public final class Rebirth extends SimpleApplication {
         viewPort.setBackgroundColor(new ColorRGBA(0.02f, 0.02f, 0.04f, 1f));
         // FOV = celui du moteur 2D (focshft 6 → fish-eye large, ~124° vertical) ; réglable -Dfov.
         // Plan near PROCHE (0.05) : sinon en s'approchant d'un mur le polygone croise le near et se clippe.
-        cam.setFrustumPerspective(FOV, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f);
+        cam.setFrustumPerspective(opt.fov, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f);
 
         // single-pass : permet plusieurs point lights en une passe (perf)
         renderManager.setPreferredLightMode(TechniqueDef.LightMode.SinglePass);
@@ -210,7 +213,7 @@ public final class Rebirth extends SimpleApplication {
             attachScreenshot();
         } else {
             inMenu = true;
-            menu.init(FB_W, FB_H);
+            menu.init(FB_W, FB_H, true);               // avec l'entrée OPTIONS (mode 3D)
         }
     }
 
@@ -350,7 +353,29 @@ public final class Rebirth extends SimpleApplication {
     public void simpleUpdate(float tpf) {
         frame++;
         grabCursor();                                   // maintient le verrou souris (JME peut le relâcher)
+        if (cam.getWidth() != lastW || cam.getHeight() != lastH) {   // résolution changée (restart) → relayout
+            lastW = cam.getWidth(); lastH = cam.getHeight(); relayoutGui();
+        }
         boolean fire = kFire;
+
+        // ----- ÉCHAP contextuel (on gère nous-mêmes, pas de quit brutal) -----
+        if (kEsc && !prevEsc) {
+            if (awaitingKey) awaitingKey = false;                       // annule un remap en cours
+            else if (inOptions) { opt.save(); inOptions = false; menu.init(FB_W, FB_H, true); }
+            else if (inMenu) stop();                                    // menu → quitter
+            else { inMenu = true; menu.init(FB_W, FB_H, true); }        // en jeu → retour menu
+        }
+        prevEsc = kEsc;
+
+        // ----- MENU OPTIONS (overlay 2D plein écran) -----
+        if (inOptions) {
+            updateOptions(fire);
+            renderOptions();
+            uploadStoryFramebuffer();
+            showWorld(false);
+            if (audio != null) audio.updateMusic();
+            return;
+        }
 
         // ----- MENU TITRE / ABOUT (overlay 2D plein écran) -----
         if (inMenu) {
@@ -362,6 +387,8 @@ public final class Rebirth extends SimpleApplication {
                 switch (menu.selectedAction) {
                     case NEW_GAME -> startGame(0);
                     case CONTINUE -> startGame(menu.selectedCheckpoint);
+                    case OPTIONS -> { inOptions = true; optRow = 0; pOptU = pOptD = pOptL = pOptR = pOptF = true;
+                                      menu.selectedAction = gloom.host.Menu.Action.NONE; }
                     case ABOUT -> { aboutMode = true; menu.selectedAction = gloom.host.Menu.Action.NONE; }
                     case EXIT -> stop();
                     case NONE -> menu.render();
@@ -411,11 +438,11 @@ public final class Rebirth extends SimpleApplication {
             scene = game.scene;
             // DÉPLACEMENT JOUEUR plus rapide (seulement lui) : ré-imposé chaque frame (le respawn restaure
             // la valeur d'objinfo). La simu (monstres/balles) reste à vitesse fidèle (SPEED=1.0).
-            Mem.ww(scene.player + Defs.ob_movspeed, Math.round(playerBaseMovspeed * PLAYER_SPEED));
+            Mem.ww(scene.player + Defs.ob_movspeed, Math.round(playerBaseMovspeed * opt.playerSpeed));
             // MOUSELOOK : souris droite (DX>0) → ob_rot augmente → vue tourne à droite (cf. rotplayer).
             if (mouseDX != 0f) {
                 Mem.wl(scene.player + Defs.ob_rot, Mem.l(scene.player + Defs.ob_rot)
-                        + (int) (mouseDX * MOUSE_SENS * 65536f));
+                        + (int) (mouseDX * opt.mouseSens * 65536f));
                 mouseDX = 0f;
             }
             Mem.wl(Vars.memat, Mem.l(Vars.memory));
@@ -445,6 +472,99 @@ public final class Rebirth extends SimpleApplication {
         gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H / 2 - 4, "BLACK MAGIC SOFTWARE 1995", 0x0f0);
         gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H / 2 + 8, "PORTAGE JAVA - REBIRTH 3D", 0x0ff);
         gloom.host.Font.drawCenteredBig(fb, FB_W, FB_H, FB_H - 24, "PRESS FIRE", 0xff0);
+    }
+
+    // ----------------------------------------------------------------- menu OPTIONS
+    private static final int OPT_ROWS = 15;
+
+    private void updateOptions(boolean fire) {
+        boolean u = kFwd, d = kBack, l = kLeft, r = kRight;
+        if (!awaitingKey) {
+            if (u && !pOptU) optRow = (optRow + OPT_ROWS - 1) % OPT_ROWS;
+            if (d && !pOptD) optRow = (optRow + 1) % OPT_ROWS;
+            editRow(optRow, l && !pOptL, r && !pOptR, fire && !pOptF);
+        }
+        pOptU = u; pOptD = d; pOptL = l; pOptR = r; pOptF = fire;
+    }
+
+    /** Édite la ligne sélectionnée : ←/→ change la valeur, feu active (apply / remap / back). */
+    private void editRow(int row, boolean left, boolean right, boolean act) {
+        switch (row) {
+            case 0 -> { if (left || right) {                       // résolution
+                int n = Options.RESOLUTIONS.length, i = opt.resolutionIndex();
+                i = ((i < 0 ? 0 : i) + (right ? 1 : n - 1)) % n;
+                opt.width = Options.RESOLUTIONS[i][0]; opt.height = Options.RESOLUTIONS[i][1];
+            } }
+            case 1 -> { if (left || right) opt.fullscreen = !opt.fullscreen; }
+            case 2 -> { if (left || right) opt.vsync = !opt.vsync; }
+            case 3 -> { if (act) applyDisplay(); }
+            case 4 -> { if (left) opt.fov = Math.max(70, opt.fov - 5);  if (right) opt.fov = Math.min(130, opt.fov + 5);
+                        if (left || right) cam.setFrustumPerspective(opt.fov, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f); }
+            case 5 -> { if (left) opt.mouseSens = Math.max(0.04f, round2(opt.mouseSens - 0.02f));
+                        if (right) opt.mouseSens = Math.min(0.50f, round2(opt.mouseSens + 0.02f)); }
+            case 6 -> { if (left) opt.playerSpeed = Math.max(1.0f, round1(opt.playerSpeed - 0.1f));
+                        if (right) opt.playerSpeed = Math.min(2.5f, round1(opt.playerSpeed + 0.1f)); }
+            case 7, 8, 9, 10, 11, 12, 13 -> { if (act) { awaitingKey = true; awaitRow = row; } }   // remap touche
+            case 14 -> { if (act) { opt.save(); inOptions = false; menu.init(FB_W, FB_H, true); } }  // back
+        }
+    }
+
+    private static float round1(float v) { return Math.round(v * 10) / 10f; }
+    private static float round2(float v) { return Math.round(v * 100) / 100f; }
+
+    /** Applique les réglages d'affichage : recrée le contexte (relayoutGui suit au prochain frame). */
+    private void applyDisplay() {
+        settings.setResolution(opt.width, opt.height);
+        settings.setFullscreen(opt.fullscreen);
+        settings.setVSync(opt.vsync);
+        setSettings(settings);
+        restart();
+    }
+
+    /** Réajuste les éléments guiNode (overlays plein écran) + FOV après un changement de résolution. */
+    private void relayoutGui() {
+        redOverlay.setMesh(new Quad(cam.getWidth(), cam.getHeight()));
+        storyQuad.setMesh(new Quad(cam.getWidth(), cam.getHeight()));
+        cam.setFrustumPerspective(opt.fov, (float) cam.getWidth() / cam.getHeight(), 0.05f, 400f);
+        grabCursor();
+    }
+
+    private void renderOptions() {
+        int fb = Mem.l(Vars.cop);
+        for (int i = 0; i < FB_W * FB_H; i++) Mem.ww(fb + i * 2, 0);
+        gloom.host.Font.drawCenteredBig(fb, FB_W, FB_H, 6, "OPTIONS", 0x96f);
+        String[] rows = optionRows();
+        int y = 28, lh = gloom.host.Font.CH + 4;
+        for (int i = 0; i < rows.length; i++) {
+            gloom.host.Font.draw(fb, FB_W, FB_H, 22, y, (i == optRow ? ">" : " ") + rows[i], i == optRow ? 0xfff : 0x9bd);
+            y += lh;
+        }
+        gloom.host.Font.drawCentered(fb, FB_W, FB_H, FB_H - 11, "ESC = BACK", 0x0ff);
+    }
+
+    private String[] optionRows() {
+        return new String[]{
+                "RESOLUTION    " + opt.width + "X" + opt.height,
+                "DISPLAY       " + (opt.fullscreen ? "FULLSCREEN" : "WINDOW"),
+                "VSYNC         " + (opt.vsync ? "ON" : "OFF"),
+                "[ APPLY DISPLAY ]",
+                "FOV           " + (int) opt.fov,
+                "MOUSE SENS    " + String.format(java.util.Locale.US, "%.2f", opt.mouseSens),
+                "PLAYER SPEED  " + String.format(java.util.Locale.US, "%.1f", opt.playerSpeed),
+                keyRow("FORWARD", opt.kForward, 7),
+                keyRow("BACKWARD", opt.kBack, 8),
+                keyRow("TURN LEFT", opt.kLeft, 9),
+                keyRow("TURN RIGHT", opt.kRight, 10),
+                keyRow("STRAFE LEFT", opt.kStrafeL, 11),
+                keyRow("STRAFE RIGHT", opt.kStrafeR, 12),
+                keyRow("FIRE", opt.kFire, 13),
+                "[ BACK ]"
+        };
+    }
+
+    private String keyRow(String label, int code, int row) {
+        String val = (awaitingKey && awaitRow == row) ? "PRESS A KEY..." : Options.keyName(code);
+        return (label + "              ").substring(0, 14) + val;
     }
 
     /** Bascule l'affichage : monde 3D + HUD (en jeu) ou overlay 2D plein écran (histoire / game over). */
@@ -980,36 +1100,64 @@ public final class Rebirth extends SimpleApplication {
     // ----------------------------------------------------------------- contrôles + outils
 
     private void bindKeys() {
-        inputManager.addMapping("fwd", new KeyTrigger(KeyInput.KEY_W), new KeyTrigger(KeyInput.KEY_UP));
-        inputManager.addMapping("back", new KeyTrigger(KeyInput.KEY_S), new KeyTrigger(KeyInput.KEY_DOWN));
-        inputManager.addMapping("left", new KeyTrigger(KeyInput.KEY_LEFT));
-        inputManager.addMapping("right", new KeyTrigger(KeyInput.KEY_RIGHT));
-        inputManager.addMapping("sl", new KeyTrigger(KeyInput.KEY_A));
-        inputManager.addMapping("sr", new KeyTrigger(KeyInput.KEY_D));
-        // tir : Ctrl / Espace / CLIC GAUCHE souris
-        inputManager.addMapping("fire", new KeyTrigger(KeyInput.KEY_LCONTROL), new KeyTrigger(KeyInput.KEY_SPACE),
-                new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
+        // on gère Échap nous-mêmes (menu/options/jeu) au lieu de quitter brutalement l'app.
+        if (inputManager.hasMapping(SimpleApplication.INPUT_MAPPING_EXIT))
+            inputManager.deleteMapping(SimpleApplication.INPUT_MAPPING_EXIT);
+        inputManager.addMapping("esc", new KeyTrigger(KeyInput.KEY_ESCAPE));
         ActionListener al = (name, pressed, tpf) -> {
             switch (name) {
                 case "fwd" -> kFwd = pressed;   case "back" -> kBack = pressed;
                 case "left" -> kLeft = pressed; case "right" -> kRight = pressed;
                 case "sl" -> kStrafeL = pressed; case "sr" -> kStrafeR = pressed;
-                case "fire" -> kFire = pressed;
+                case "fire" -> kFire = pressed; case "esc" -> kEsc = pressed;
             }
         };
-        inputManager.addListener(al, "fwd", "back", "left", "right", "sl", "sr", "fire");
+        inputManager.addListener(al, "fwd", "back", "left", "right", "sl", "sr", "fire", "esc");
+        applyBindings();                               // crée les mappings de touches depuis opt
 
-        // MOUSELOOK : delta X de la souris en PIXELS → rotation du joueur (appliqué dans simpleUpdate).
+        // MOUSELOOK (delta X en pixels) + CAPTURE de touche pour le remap (mode options).
         inputManager.addRawInputListener(new RawInputListener() {
             @Override public void onMouseMotionEvent(com.jme3.input.event.MouseMotionEvent e) { mouseDX += e.getDX(); }
+            @Override public void onKeyEvent(com.jme3.input.event.KeyInputEvent e) {
+                if (awaitingKey && e.isPressed() && !e.isRepeating() && e.getKeyCode() != KeyInput.KEY_ESCAPE) {
+                    assignKey(awaitRow, e.getKeyCode());
+                    applyBindings();
+                    awaitingKey = false;
+                    e.setConsumed();                   // n'active pas un contrôle/menu avec cette touche
+                }
+            }
             @Override public void beginInput() { }
             @Override public void endInput() { }
             @Override public void onJoyAxisEvent(com.jme3.input.event.JoyAxisEvent e) { }
             @Override public void onJoyButtonEvent(com.jme3.input.event.JoyButtonEvent e) { }
             @Override public void onMouseButtonEvent(com.jme3.input.event.MouseButtonEvent e) { }
-            @Override public void onKeyEvent(com.jme3.input.event.KeyInputEvent e) { }
             @Override public void onTouchEvent(com.jme3.input.event.TouchEvent e) { }
         });
+    }
+
+    /** (Re)crée les mappings de touches depuis {@link #opt} (appelé à l'init et après un remap). */
+    private void applyBindings() {
+        for (String n : new String[]{"fwd", "back", "left", "right", "sl", "sr", "fire"})
+            if (inputManager.hasMapping(n)) inputManager.deleteMapping(n);
+        inputManager.addMapping("fwd", new KeyTrigger(opt.kForward), new KeyTrigger(KeyInput.KEY_UP));   // ↑ = nav menu
+        inputManager.addMapping("back", new KeyTrigger(opt.kBack), new KeyTrigger(KeyInput.KEY_DOWN));
+        inputManager.addMapping("left", new KeyTrigger(opt.kLeft));
+        inputManager.addMapping("right", new KeyTrigger(opt.kRight));
+        inputManager.addMapping("sl", new KeyTrigger(opt.kStrafeL));
+        inputManager.addMapping("sr", new KeyTrigger(opt.kStrafeR));
+        // tir : touche configurable + Espace/Entrée (validation menu) + CLIC GAUCHE souris
+        inputManager.addMapping("fire", new KeyTrigger(opt.kFire), new KeyTrigger(KeyInput.KEY_SPACE),
+                new KeyTrigger(KeyInput.KEY_RETURN), new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
+    }
+
+    /** Affecte le code touche capturé à l'action de la ligne d'options. */
+    private void assignKey(int row, int code) {
+        switch (row) {
+            case 7 -> opt.kForward = code;  case 8 -> opt.kBack = code;
+            case 9 -> opt.kLeft = code;     case 10 -> opt.kRight = code;
+            case 11 -> opt.kStrafeL = code; case 12 -> opt.kStrafeR = code;
+            case 13 -> opt.kFire = code;
+        }
     }
 
     /** Spawne un ennemi (marine) devant le joueur — pour vérifier les billboards en mode -Dshot. */
