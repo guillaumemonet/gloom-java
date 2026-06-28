@@ -830,9 +830,7 @@ public final class Rebirth extends SimpleApplication {
     private void loadLevelGeometry() {
         hdEpisode = episodeOf(game.currentMap);                    // dossier HD : hd/<épisode>/ (ex. map1)
         playerBaseMovspeed = Mem.w(scene.player + Defs.ob_movspeed);   // vitesse fidèle (joueur fraîchement spawné)
-        // zones-portes (do_poly = adresse de zone) : leurs murs seront légèrement décalés (anti z-fighting).
-        doorZones.clear();
-        for (int d = Mem.l(Vars.doors); Mem.l(d) != 0; d = Mem.l(d)) doorZones.add(Mem.l(d + Defs.do_poly));
+        doorZones.clear();                                         // accumulées au fil du jeu (cf. collectWalls)
         // --- purge du niveau précédent ---
         walls.detachAllChildren();
         enemies.detachAllChildren();
@@ -894,6 +892,11 @@ public final class Rebirth extends SimpleApplication {
             int pp = ppnt + Mem.uw(a0 + 2) * 2;
             for (int i = 0; i <= num; i++) { zones.add(Mem.uw(pp)); pp += 2; }
         }
+        // ACCUMULE les zones-portes actuellement dans Vars.doors : une porte ouverte est ajoutée à la
+        // liste pendant l'animation puis peut en être retirée une fois ouverte ; en mémorisant la zone
+        // pour tout le niveau, son mur reste décalé même après la transition (sinon le z-fighting revient).
+        for (int d = Mem.l(Vars.doors); Mem.l(d) != 0; d = Mem.l(d)) doorZones.add(Mem.l(d + Defs.do_poly));
+
         Map<Integer, List<float[]>> byTex = new HashMap<>();
         for (int z : zones) {
             int zb = poly + z * Defs.zo_size;
