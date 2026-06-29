@@ -79,7 +79,6 @@ public final class Rebirth extends SimpleApplication {
 
     private static final float S = 1f / 64f;          // échelle gloom → JME
     private static final float WALL_H = 256f * S;
-    private static final float DOOR_OFFSET = 4f;      // décalage (unités gloom) des murs de portes, anti z-fighting
     private static final boolean HEADLESS = System.getProperty("shot") != null;
     private static final String MAP = System.getProperty("map", "map1_3");
     private static final String TILE = System.getProperty("tile", "1");
@@ -104,6 +103,7 @@ public final class Rebirth extends SimpleApplication {
     private final Node goreNode = new Node("gore");                  // décals de gore au sol (liste Vars.gore)
     private final Node walls = new Node("walls");                    // murs reconstruits chaque frame (portes animées)
     private final Map<Integer, Material> wallMatCache = new HashMap<>();
+    private final Map<Integer, Material> doorMatCache = new HashMap<>();   // matériaux de portes (PolyOffset)
     private final Map<Integer, Texture2D> wallTexCache = new HashMap<>();
     private final Map<Integer, Texture2D> spriteCache = new HashMap<>();
     private final Map<Integer, float[]> texLight = new HashMap<>();  // texNum → {r,g,b} si texture émissive
@@ -840,7 +840,7 @@ public final class Rebirth extends SimpleApplication {
         if (ceilGeom != null) { ceilGeom.removeFromParent(); ceilGeom = null; }
         for (PointLight pl : levelLights) rootNode.removeLight(pl);
         levelLights.clear();
-        wallTexCache.clear(); wallMatCache.clear(); seeThroughTex.clear();
+        wallTexCache.clear(); wallMatCache.clear(); doorMatCache.clear(); seeThroughTex.clear();
         texLight.clear(); wallTexBase.clear(); slotOfBase.clear(); spriteCache.clear();
 
         // --- construit le nouveau niveau ---
@@ -902,12 +902,8 @@ public final class Rebirth extends SimpleApplication {
             int zb = poly + z * Defs.zo_size;
             float lx = (short) Mem.w(zb + Defs.zo_lx), lz = (short) Mem.w(zb + Defs.zo_lz);
             float rx = (short) Mem.w(zb + Defs.zo_rx), rz = (short) Mem.w(zb + Defs.zo_rz);
-            if (doorZones.contains(zb)) {              // mur de porte : décalé le long de sa normale (anti z-fighting)
-                float dx = rx - lx, dz = rz - lz, len = (float) Math.sqrt(dx * dx + dz * dz) + 1e-6f;
-                float ox = -dz / len * DOOR_OFFSET, oz = dx / len * DOOR_OFFSET;
-                lx += ox; lz += oz; rx += ox; rz += oz;
-            }
-            byTex.computeIfAbsent(Mem.ub(zb + Defs.zo_t), k -> new ArrayList<>()).add(new float[]{lx, lz, rx, rz});
+            float door = doorZones.contains(zb) ? 1f : 0f;       // drapeau porte (5e élément) → PolyOffset au rendu
+            byTex.computeIfAbsent(Mem.ub(zb + Defs.zo_t), k -> new ArrayList<>()).add(new float[]{lx, lz, rx, rz, door});
         }
         return byTex;
     }
@@ -958,11 +954,20 @@ public final class Rebirth extends SimpleApplication {
         Map<Integer, List<float[]>> byTex = collectWalls();
         refreshAnimatedTextures(byTex.keySet());                   // textures animées : reconstruit si le pointeur a changé
         for (var e : byTex.entrySet()) {
-            Geometry wg = new Geometry("w" + e.getKey(), wallMesh(e.getValue()));
-            wg.setMaterial(wallMaterial(e.getKey()));
-            if (seeThroughTex.contains(e.getKey())) wg.setShadowMode(ShadowMode.Receive);   // grille ajourée
-            walls.attachChild(wg);
+            int tex = e.getKey();
+            List<float[]> stat = new ArrayList<>(), door = new ArrayList<>();
+            for (float[] w : e.getValue()) (w[4] != 0f ? door : stat).add(w);   // sépare murs statiques / portes
+            if (!stat.isEmpty()) attachWalls("w" + tex, tex, stat, false);
+            if (!door.isEmpty()) attachWalls("d" + tex, tex, door, true);       // portes : PolyOffset (priorité profondeur)
         }
+    }
+
+    /** Crée et attache une géométrie de murs ; {@code doorPoly} → matériau à biais de profondeur (anti z-fighting). */
+    private void attachWalls(String name, int tex, List<float[]> segs, boolean doorPoly) {
+        Geometry wg = new Geometry(name, wallMesh(segs));
+        wg.setMaterial(doorPoly ? doorMaterial(tex) : wallMaterial(tex));
+        if (seeThroughTex.contains(tex)) wg.setShadowMode(ShadowMode.Receive);  // grille ajourée
+        walls.attachChild(wg);
     }
 
     /** Matériau de mur (caché par texture) : Lighting.j3md + alpha discard si texture ajourée. */
@@ -970,6 +975,17 @@ public final class Rebirth extends SimpleApplication {
         return wallMatCache.computeIfAbsent(tex, k -> {
             Material m = litTextured(wallTexture(k), true);        // wallTexture() remplit seeThroughTex avant le test
             if (seeThroughTex.contains(k)) m.setFloat("AlphaDiscardThreshold", 0.5f);
+            return m;
+        });
+    }
+
+    /** Matériau des murs de PORTES : même texture qu'un mur normal + biais de profondeur (PolyOffset) →
+     *  la porte gagne le test de profondeur sur un mur statique coplanaire (plus de z-fighting), SANS
+     *  déplacer la géométrie (les boutons/zones activables restent à leur vraie place). */
+    private Material doorMaterial(int tex) {
+        return doorMatCache.computeIfAbsent(tex, k -> {
+            Material m = wallMaterial(k).clone();              // clone → ne modifie pas le matériau partagé
+            m.getAdditionalRenderState().setPolyOffset(-1f, -2f);
             return m;
         });
     }
