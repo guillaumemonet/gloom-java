@@ -15,7 +15,8 @@ import javax.imageio.ImageIO;
 /**
  * Harnais « gore/sparks » (08c) : valide les étincelles d'impact (makesparks via calcbounce),
  * la gerbe de sang + les gibs à la mort (blowobject→bloodymess2/blowchunx), la physique du sang
- * (moveblood) et les décals de gore au sol (chunklogic, mode≠0).
+ * (moveblood), les décals de gore au sol (chunklogic, mode≠0) et le sang des coups NON fatals
+ * avec le flinch qui va avec (hurtobject→bloodymess/pauselogic2).
  *
  * Sur com1_1 : on tire dans les murs (étincelles), on tue un marine (sang + gibs qui retombent),
  * puis avec `mode=1` les gibs laissent des décals dans la liste `gore`. Écrit gore.png. `gradle goreTest`.
@@ -82,6 +83,38 @@ public final class GoreTest {
         int goreAfter = listSize(Vars.gore);
         System.out.println("[info] décals de gore : " + goreBefore + " → " + goreAfter);
         checkTrue("les gibs laissent des décals de gore au sol", goreAfter > goreBefore);
+
+        // ---- Phase H : sang À CHAQUE COUP + flinch (hurtobject, gloom.s:3494) ------------
+        // Un marine qui ne peut PAS mourir : le tir passe donc par ob_hit (hurtngrunt→hurtobject)
+        // et non par ob_die, ce qui isole le sang des coups encaissés de celui de la mort.
+        int px3 = Mem.l(p + Defs.ob_x) >> 16, pz3 = Mem.l(p + Defs.ob_z) >> 16;
+        int tough = spawnMarine(px3 + 250, pz3 - 80);
+        checkTrue("marine « encaisseur » spawné", tough != 0);
+        Mem.ww(tough + Defs.ob_hitpoints, 250);
+        int bloodBeforeHit = listSize(Vars.blood);
+        aimAt(p, tough);
+        Mem.wb(p + Defs.ob_reloadcnt, 0);
+        scene.setInput(0, 0, -1, 0); scene.tick(); scene.tick();
+        scene.setInput(0, 0, 0, 0);
+        int bloodOnHit = 0, flinch = 0;
+        for (int k = 0; k < 40 && bloodOnHit <= 0; k++) {
+            scene.tick();
+            bloodOnHit = listSize(Vars.blood) - bloodBeforeHit;
+            if (Mem.l(tough + Defs.ob_logic) == Objects.L_PAUSE2)
+                flinch = Mem.w(tough + Defs.ob_hurtwait);
+        }
+        System.out.println("[info] coup NON fatal : gouttes = " + bloodOnHit
+                + ", flinch (ob_hurtwait) = " + flinch
+                + ", frame = " + Mem.w(tough + Defs.ob_frame));
+        checkTrue("un coup non fatal fait saigner (hurtobject → bloodymess 24)", bloodOnHit >= 24);
+        checkTrue("le monstre touché bronche (ob_logic → pauselogic2)", flinch > 0);
+        for (int k = 0; k < 16; k++) scene.tick();              // laisse expirer ob_hurtwait
+        System.out.println("[info] après le flinch : logique restaurée = "
+                + (Mem.l(tough + Defs.ob_logic) != Objects.L_PAUSE2));
+        checkTrue("le flinch expire et rend sa logique au monstre (pauselogic2)",
+                Mem.l(tough + Defs.ob_logic) != Objects.L_PAUSE2);
+        checkTrue("le flinch rend aussi ob_hit (le monstre redevient touchable)",
+                Mem.l(tough + Defs.ob_hit) == Objects.H_HURTNGRUNT);
 
         scene.renderFrame();
         dumpPng(Mem.l(Vars.cop), "gore.png");

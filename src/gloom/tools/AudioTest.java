@@ -23,6 +23,17 @@ public final class AudioTest {
         checkTrue("footstep chargé", Vars.footstepsfx != 0);
         checkTrue("door chargé", Mem.l(Vars.doorsfx) != 0);
         checkTrue("teleport chargé", Mem.l(Vars.telesfx) != 0);
+        // sons de coup encaissé (hurtobject) + voix d'ambiance des monstres
+        for (int i = 0; i < 4; i++)
+            checkTrue("grunt" + (i + 1) + " chargé (grunttable)", Vars.grunttable[i] != 0);
+        checkTrue("lizhit chargé", Vars.lizhitsfx != 0);
+        checkTrue("trollhit chargé", Vars.trollhitsfx != 0);
+        checkTrue("shoot2 chargé (impact terra)", Vars.shootsfx2 != 0);
+        checkTrue("ghoul chargé", Vars.ghoulsfx != 0);
+        checkTrue("lizard chargé", Vars.lizsfx != 0);
+        checkTrue("trollmad chargé", Vars.trollsfx != 0);
+        checkTrue("robot chargé", Vars.robotsfx != 0);
+        checkTrue("dragon chargé", Vars.dragonsfx != 0);
 
         // format : [période(2)][longueur-mots(2)][PCM 8 bits]
         int s = Vars.shootsfx;

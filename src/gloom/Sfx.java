@@ -46,6 +46,18 @@ public final class Sfx {
         Vars.footstepsfx = load("sfxs/footstep.bin");
         Vars.robodiesfx = load("sfxs/robodie.bin");
         Vars.gruntsfx = load("sfxs/grunt.bin");
+        Vars.gruntsfx2 = load("sfxs/grunt2.bin");
+        Vars.gruntsfx3 = load("sfxs/grunt3.bin");
+        Vars.gruntsfx4 = load("sfxs/grunt4.bin");
+        Vars.grunttable[0] = Vars.gruntsfx;   Vars.grunttable[1] = Vars.gruntsfx2;
+        Vars.grunttable[2] = Vars.gruntsfx3;  Vars.grunttable[3] = Vars.gruntsfx4;
+        Vars.lizhitsfx = load("sfxs/lizhit.bin");        // coup encaissé : lézard
+        Vars.trollhitsfx = load("sfxs/trollhit.bin");    // coup encaissé : troll
+        Vars.ghoulsfx = load("sfxs/ghoul.bin");          // voix d'ambiance des monstres
+        Vars.lizsfx = load("sfxs/lizard.bin");
+        Vars.trollsfx = load("sfxs/trollmad.bin");
+        Vars.robotsfx = load("sfxs/robot.bin");
+        Vars.dragonsfx = load("sfxs/dragon.bin");
     }
 
     private static int load(String path) {

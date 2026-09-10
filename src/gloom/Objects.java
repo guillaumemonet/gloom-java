@@ -37,7 +37,8 @@ public final class Objects {
             L_PLAYERDEATH = 18, L_PLAYERDEAD = 19, L_WAITRESTART = 20, L_PLAYERLOGIC0 = 21, // mort joueur
             L_BALDYCHARGE = 22, L_BALDYPUNCH = 23, L_TROLLLOGIC2 = 24, L_TERRALOGIC2 = 25,   // IA monstres
             L_DEMONPAUSE = 26,
-            L_DEATHCHARGE = 27, L_DEATHSUCK = 28, L_HOMEIN = 29, L_DRAGONDEAD = 30;          // boss
+            L_DEATHCHARGE = 27, L_DEATHSUCK = 28, L_HOMEIN = 29, L_DRAGONDEAD = 30,          // boss
+            L_PAUSE2 = 31;                            // 08c : monstre qui bronche (hurtobject)
     public static final int D_KILL = 12;              // ob_die = killobject (balle : retrait simple)
     // hit/die (08b) — identifiants opaques, non dispatchés en 08a
     public static final int H_RTS = 0, H_PLAYERHIT = 1, H_HEALTHGOT = 2, H_WEAPONGOT = 3,
@@ -362,6 +363,7 @@ public final class Objects {
             case L_PLAYERLOGIC0 -> Player.playerlogic0(a5);       // invincibilité de respawn
             case L_FIRE -> firelogic(a5);                         // balle : déplacement + collision murs
             case L_PAUSE -> pauselogic(a5);                       // monstre en pause post-tir
+            case L_PAUSE2 -> pauselogic2(a5);                     // monstre sonné par un coup (flinch)
             case L_SPARKS -> sparkslogic(a5);                     // étincelle d'impact
             case L_CHUNK -> chunklogic(a5);                       // gib en vol
             // IA spécifiques par type de monstre
@@ -390,12 +392,23 @@ public final class Objects {
         }
     }
 
-    /** Dispatch ob_hit : dégâts déjà appliqués ; joueur → flash rouge, monstre touché → grognement. */
+    /**
+     * Dispatch ob_hit : dégâts déjà appliqués. Joueur → flash rouge ; monstre touché → son PROPRE
+     * À SON TYPE puis {@link #hurtobject} (sang + flinch), sauf le ghoul qui a son propre hurtghoul
+     * (32 gouttes, aucun son, pas de flinch).
+     */
     private static void dispatchHit(int id, int hit, int attacker) {
-        if (id == H_PLAYERHIT) Player.playerhit(hit, attacker);   // flash rouge sur dégâts
-        else if (id == H_HURTDEATH) hurtdeath(hit);               // deathhead touché → aspire l'âme du joueur
-        else if (id == H_MAKESPARKSQ) makesparksq(hit);           // missile dragon touché → étincelles
-        else if (id >= H_HURTNGRUNT) Sfx.playsfx(Vars.gruntsfx, 48, 1); // monstre blessé (grunt)
+        switch (id) {
+            case H_PLAYERHIT -> Player.playerhit(hit, attacker);  // flash rouge sur dégâts
+            case H_HURTDEATH -> hurtdeath(hit);                   // deathhead touché → aspire l'âme du joueur
+            case H_MAKESPARKSQ -> makesparksq(hit);               // missile dragon touché → étincelles
+            case H_HURTGHOUL -> hurtghoul(hit);                   // ghoul : 32 gouttes, muet, pas de flinch
+            case H_HURTNGRUNT -> hurtngrunt(hit, attacker);       // grognement (1 des 4) + sang + flinch
+            case H_HURTTERRA -> hurtterra(hit, attacker);         // impact métallique + sang + flinch
+            case H_LIZHURT -> lizhurt(hit, attacker);             // cri du lézard + sang + flinch
+            case H_TROLLHURT -> trollhurt(hit, attacker);         // cri du troll + sang + flinch
+            default -> { }                                        // ob_hit = rts
+        }
     }
 
     /** Dispatch ob_die : mort/ramassage. attacker = joueur qui ramasse, hit = pickup. */
@@ -520,10 +533,13 @@ public final class Objects {
         bl2(a5);
     }
 
-    public static void lizardlogic(int a5) {                      // 3841 (sfx d'ambiance omis)
+    public static void lizardlogic(int a5) {                      // 3841
         int d = M68k.w(Mem.w(a5 + Defs.ob_delay) - 1);
         Mem.ww(a5 + Defs.ob_delay, d);
         if (d > 0) { monstermove(a5); return; }
+        pickcalc(a5);                                             // bsr pickcalc (a0 = joueur ; d0 ignoré)
+        if (Integer.compareUnsigned(distSqToPlayer(a5), 256 * 256) < 0)
+            Sfx.playsfx(Vars.lizsfx, 32, 5);                      // siffle si le joueur est à portée
         bl2(a5);
     }
 
@@ -539,6 +555,9 @@ public final class Objects {
         int d = M68k.w(Mem.w(a5 + Defs.ob_delay) - 1);
         Mem.ww(a5 + Defs.ob_delay, d);
         if (d > 0) { monstermove(a5); return; }
+        pickcalc(a5);                                             // bsr pickcalc (a0 = joueur ; d0 ignoré)
+        if (Integer.compareUnsigned(distSqToPlayer(a5), 320 * 320) < 0)
+            Sfx.playsfx(Vars.trollsfx, 64, 5);                    // rugit si le joueur est à portée
         bl2(a5);
     }
 
@@ -593,7 +612,9 @@ public final class Objects {
             Mem.wl(a5 + Defs.ob_logic, L_TERRALOGIC2);
             return;
         }
-        monstermove(a5);                                          // (sfx robot d'ambiance omis)
+        if ((Mem.w(a5 + Defs.ob_delay) & 31) == 0)                // 1 frame sur 32 : vrombissement
+            Sfx.playsfx(Vars.robotsfx, 64, 10);
+        monstermove(a5);
     }
 
     public static void terralogic2(int a5) {                      // 3914
@@ -629,6 +650,7 @@ public final class Objects {
         // déplacement libre (ignore les murs) ; recale le vecteur au hasard
         if (Integer.compareUnsigned(Maths.rndw() & 0xffff, (Mem.w(a5 + Defs.ob_movspeed) << 8) & 0xffff) < 0) {
             calcvecs(a5);
+            Sfx.playsfx(Vars.ghoulsfx, 32, -5);                   // gémit en changeant de cap
         }
         Mem.wl(a5 + Defs.ob_x, Mem.l(a5 + Defs.ob_x) + Mem.l(a5 + Defs.ob_xvec));
         Mem.wl(a5 + Defs.ob_z, Mem.l(a5 + Defs.ob_z) + Mem.l(a5 + Defs.ob_zvec));
@@ -722,7 +744,10 @@ public final class Objects {
             calcvecs(a5);
             return;
         }
-        if (Mem.w(a5 + Defs.ob_rotspeed) != 0) Mem.ww(a5 + Defs.ob_rotspeed, 0); // pointé → fonce tout droit
+        if (Mem.w(a5 + Defs.ob_rotspeed) != 0) {                   // pointé → fonce tout droit
+            Mem.ww(a5 + Defs.ob_rotspeed, 0);
+            Sfx.playsfx(Vars.dragonsfx, 64, 20);                   // et rugit
+        }
     }
 
     /** dragonfire (4209) : par salves, crée un missile à tête chercheuse (bullet5/sparks5). */
@@ -1274,6 +1299,87 @@ public final class Objects {
         if (d1 < 64 || d1 >= 192) return;                         // joueur devant → garde le cap (.skip)
         Mem.ww(a5 + Defs.ob_rot, Mem.w(a5 + Defs.ob_oldrot));     // .useold
         calcvecs(a5);
+    }
+
+    /**
+     * hurtobject (gloom.s:3494) : socle commun des {@code ob_hit} de monstre — c'est LUI qui fait
+     * gicler le sang à chaque coup encaissé, pas seulement à la mort. a5 = victime, a0 = attaquant.
+     *
+     * <ul>
+     *   <li>{@code ob_colltype(a0) & 24} ≠ 0 → on sort : l'attaquant est un JOUEUR (colltype 8/16,
+     *       cf. objinfo), donc un dégât de contact, qui ne saigne pas.</li>
+     *   <li>sinon (une balle, colltype 4) : {@code bloodymess} de 24 gouttes ;</li>
+     *   <li>puis, si {@code ob_hurtpause} est non nul, le monstre BRONCHE : frame 4, logique et
+     *       {@code ob_hit} sauvegardés puis remplacés par {@code pauselogic2}/rts — il est donc
+     *       sonné ET intouchable pendant {@code ob_hurtwait} frames.</li>
+     * </ul>
+     */
+    private static void hurtobject(int a5, int a0) {
+        if ((Mem.w(a0 + Defs.ob_colltype) & 24) != 0) return;     // and #24,d0 ; bne .rts
+        bloodymess(a5, 23);                                       // moveq #23,d7 → 24 gouttes
+        int hp = Mem.w(a5 + Defs.ob_hurtpause);
+        Mem.ww(a5 + Defs.ob_hurtwait, hp);
+        if (hp == 0) return;                                      // beq .rts : ce type ne bronche pas
+        Mem.ww(a5 + Defs.ob_frame, 4);                            // move #4,ob_frame (mot fort)
+        Mem.wl(a5 + Defs.ob_oldlogic2, Mem.l(a5 + Defs.ob_logic));
+        Mem.wl(a5 + Defs.ob_oldhit, Mem.l(a5 + Defs.ob_hit));
+        Mem.wl(a5 + Defs.ob_logic, L_PAUSE2);                     // pauselogic2
+        Mem.wl(a5 + Defs.ob_hit, H_RTS);                          // plus touchable pendant le flinch
+    }
+
+    /** hurtghoul (gloom.s:3466) : 32 gouttes, sans sfx ni flinch — le ghoul ne bronche pas. */
+    private static void hurtghoul(int a5) {
+        bloodymess(a5, 31);                                       // moveq #31,d7
+    }
+
+
+    // grunttable/lastgrunt (gloom.s:7465) : évite de rejouer deux fois de suite le même grognement.
+    private static int lastgrunt;
+
+    /** hurtngrunt (gloom.s:3478) : un grognement au hasard parmi 4 (jamais le même deux fois), puis hurtobject. */
+    private static void hurtngrunt(int a5, int a0) {
+        int d0 = Maths.rndw() & 3;
+        if (d0 == lastgrunt) d0 = (d0 + 1) & 3;                   // cmp lastgrunt ; addq #1 ; and #3
+        lastgrunt = d0;
+        Sfx.playsfx(Vars.grunttable[d0], 64, 1);
+        hurtobject(a5, a0);
+    }
+
+    /** hurtterra (gloom.s:3470) : impact métallique (shootsfx2) puis hurtobject. */
+    private static void hurtterra(int a5, int a0) {
+        Sfx.playsfx(Vars.shootsfx2, 64, 2);
+        hurtobject(a5, a0);
+    }
+
+    /** lizhurt (gloom.s:3511) : cri du lézard puis hurtobject. */
+    private static void lizhurt(int a5, int a0) {
+        Sfx.playsfx(Vars.lizhitsfx, 64, 1);
+        hurtobject(a5, a0);
+    }
+
+    /** trollhurt (gloom.s:3519) : cri du troll puis hurtobject. */
+    private static void trollhurt(int a5, int a0) {
+        Sfx.playsfx(Vars.trollhitsfx, 64, 1);
+        hurtobject(a5, a0);
+    }
+
+    /** Distance² au joueur en unités-mot : le bloc commun de trolllogic2/lizardlogic (voix d'ambiance). */
+    private static int distSqToPlayer(int a5) {
+        int a0 = Mem.l(gloom.data.ObjInfo.player1);
+        if (a0 == 0) return Integer.MAX_VALUE;
+        int d0 = M68k.w(Mem.w(a5 + Defs.ob_x) - Mem.w(a0 + Defs.ob_x));
+        int d1 = M68k.w(Mem.w(a5 + Defs.ob_z) - Mem.w(a0 + Defs.ob_z));
+        return M68k.muls(d0, d0) + M68k.muls(d1, d1);
+    }
+
+    /** pauselogic2 (gloom.s:3527) : décompte ob_hurtwait ; à 0 → restaure frame/logique/ob_hit. */
+    public static void pauselogic2(int a5) {
+        int d = M68k.w(Mem.w(a5 + Defs.ob_hurtwait) - 1);
+        Mem.ww(a5 + Defs.ob_hurtwait, d);
+        if (d > 0) return;                                        // bgt .rts
+        Mem.ww(a5 + Defs.ob_frame, 0);                            // clr ob_frame (mot fort)
+        Mem.wl(a5 + Defs.ob_logic, Mem.l(a5 + Defs.ob_oldlogic2));
+        Mem.wl(a5 + Defs.ob_hit, Mem.l(a5 + Defs.ob_oldhit));
     }
 
     /**

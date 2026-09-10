@@ -85,6 +85,12 @@ public final class Vars {
     /** Échantillons SFX (adresses Mem [période][long-mots][PCM]), chargés par Sfx.loadSamples (09). */
     public static int shootsfx, shootsfx2, shootsfx3, shootsfx4, shootsfx5,
             diesfx, splatsfx, tokensfx, footstepsfx, robodiesfx, gruntsfx;
+    /** Grognements 2-4 (gloom.s:7475) : hurtngrunt en tire un au hasard via {@link #grunttable}. */
+    public static int gruntsfx2, gruntsfx3, gruntsfx4;
+    /** Sons de COUP par type (hurtobject, gloom.s:7487) et voix d'ambiance des monstres. */
+    public static int lizhitsfx, trollhitsfx, ghoulsfx, lizsfx, trollsfx, robotsfx, dragonsfx;
+    /** grunttable (gloom.s:7467) : les 4 grognements, indexés par le tirage de hurtngrunt. */
+    public static final int[] grunttable = new int[4];
     public static final int eventobj;      // dc.l 0 (5296)
     public static final int finished;      // dc 0 (7542)
     public static final int finished2;     // dc 0 (7543)
