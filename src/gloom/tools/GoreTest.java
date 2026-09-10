@@ -33,6 +33,9 @@ public final class GoreTest {
         Mem.ww(p + Defs.ob_weapon, 0);
 
         // ---- Phase S : étincelles à l'impact d'une balle sur un mur -----------------------
+        // NB : les armes posées au sol scintillent (weaponlogic) → il y a déjà des L_SPARKS.
+        // On exige donc un SAUT franc au-dessus de ce bruit de fond, pas une simple présence.
+        int sparkBase = countLogic(Objects.L_SPARKS);
         boolean sawSparks = false;
         for (int dir = 0; dir < 256 && !sawSparks; dir += 16) {
             Mem.ww(p + Defs.ob_rot, dir);
@@ -42,7 +45,7 @@ public final class GoreTest {
             scene.setInput(0, 0, 0, 0);
             for (int k = 0; k < 30 && !sawSparks; k++) {
                 scene.tick();
-                if (countLogic(Objects.L_SPARKS) > 0) sawSparks = true;
+                if (countLogic(Objects.L_SPARKS) > sparkBase + 4) sawSparks = true;
             }
         }
         System.out.println("[info] étincelles d'impact mur = " + sawSparks);
@@ -52,11 +55,12 @@ public final class GoreTest {
         int px = Mem.l(p + Defs.ob_x) >> 16, pz = Mem.l(p + Defs.ob_z) >> 16;
         int marine = spawnMarine(px + 250, pz - 80);
         checkTrue("marine spawné", marine != 0);
+        int marineShape = Mem.l(marine + Defs.ob_shape);
         int chunks = Mem.l(marine + Defs.ob_chunks);
         System.out.println("[info] marine ob_chunks = " + (chunks != 0 ? "présent" : "absent"));
 
         killTarget(scene, p, marine, 600);
-        checkTrue("le marine est mort", !alive(marine));
+        checkTrue("le marine est mort", !alive(marine, marineShape));
         int blood = listSize(Vars.blood);
         int gibs = countLogic(Objects.L_CHUNK);
         System.out.println("[info] à la mort : gouttes de sang = " + blood + ", gibs = " + gibs);
@@ -126,7 +130,8 @@ public final class GoreTest {
 
     /** Tire jusqu'à tuer la cible (rechargement forcé à 0 pour enchaîner les tirs). */
     private static void killTarget(LevelScene scene, int p, int target, int maxTicks) {
-        for (int i = 0; i < maxTicks && alive(target); i += 4) {
+        int shape = Mem.l(target + Defs.ob_shape);
+        for (int i = 0; i < maxTicks && alive(target, shape); i += 4) {
             aimAt(p, target);
             Mem.wb(p + Defs.ob_reloadcnt, 0);
             scene.setInput(0, 0, -1, 0); scene.tick(); scene.tick();
@@ -151,9 +156,17 @@ public final class GoreTest {
         return Mem.l(ObjInfo.dummy);
     }
 
-    private static boolean alive(int obj) {
+    /**
+     * Vivant = le nœud est encore dans la liste ET porte toujours la MÊME forme. Un nœud tué
+     * retourne à la free-list et peut être RECYCLÉ dans la seconde (les armes au sol émettent des
+     * étincelles en continu) : un simple test d'adresse donnerait un faux positif.
+     */
+    private static boolean alive(int obj, int shape) {
         int o = Mem.l(Vars.objects);
-        while (Mem.l(o) != 0) { if (o == obj) return true; o = Mem.l(o); }
+        while (Mem.l(o) != 0) {
+            if (o == obj) return Mem.l(o + Defs.ob_shape) == shape;
+            o = Mem.l(o);
+        }
         return false;
     }
 

@@ -131,6 +131,50 @@ public final class Font {
         }
     }
 
+
+    /**
+     * Dessine le glyphe d'indice BRUT {@code idx} : au-delà du texte, la fonte contient des
+     * glyphes-icônes (40/41 barre de vie, 43 vie, 51-54 éclaboussures de sang) que le mapping
+     * ASCII de printmess2 ne sait pas atteindre.
+     */
+    public static void drawGlyph(int fb, int fbW, int fbH, int x, int y, int idx, int color) {
+        byte[] px = glyphOf(idx);
+        if (px == null) return;
+        for (int gy = 0; gy < SMALL.h; gy++) {
+            int py = y + gy;
+            if (py < 0 || py >= fbH) continue;
+            for (int gx = 0; gx < SMALL.w; gx++) {
+                int i = px[gy * SMALL.w + gx] & 0xff;
+                if (i == 0) continue;                          // transparent
+                int pxx = x + gx;
+                if (pxx < 0 || pxx >= fbW) continue;
+                Mem.ww(fb + (py * fbW + pxx) * 2, shade(color, SMALL.bright[i]));
+            }
+        }
+    }
+
+    /** Le même glyphe en RGBA (CW×CH) — pour le mode 3D, qui n'a pas le framebuffer 2D sous la main. */
+    public static byte[] glyphRGBA(int idx, int color) {
+        byte[] out = new byte[CW * CH * 4];
+        byte[] px = glyphOf(idx);
+        if (px == null) return out;
+        for (int p = 0; p < CW * CH; p++) {
+            int i = px[p] & 0xff;
+            if (i == 0) continue;
+            int c = shade(color, SMALL.bright[i]);
+            out[p * 4]     = (byte) (((c >> 8) & 15) * 17);
+            out[p * 4 + 1] = (byte) (((c >> 4) & 15) * 17);
+            out[p * 4 + 2] = (byte) ((c & 15) * 17);
+            out[p * 4 + 3] = (byte) 0xff;
+        }
+        return out;
+    }
+
+    private static byte[] glyphOf(int idx) {
+        if (idx < 0 || idx >= SMALL.glyph.length) return null;
+        return SMALL.glyph[idx];
+    }
+
     /** Petite fonte (6×8) — HUD, textes secondaires. */
     public static void draw(int fb, int fbW, int fbH, int x, int y, String s, int color) {
         drawWith(SMALL, fb, fbW, fbH, x, y, s, color);

@@ -54,8 +54,10 @@ import gloom.Vars;
 import gloom.data.ObjInfo;
 import gloom.data.Tables;
 import gloom.host.Audio;
+import gloom.host.Font;
 import gloom.host.Game;
 import gloom.host.LevelScene;
+import gloom.host.Splat;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -147,6 +149,10 @@ public final class Rebirth extends SimpleApplication {
     private Geometry hpBar;
     private BitmapText hudText;
     private Geometry redOverlay;                                    // voile rouge plein écran (coups + mort)
+    private BitmapText messText;                                    // message du jeu (Mess/printmess)
+    private Geometry splatQuad;                                     // éclaboussure de sang sur la vue
+    private final Map<Integer, Material> splatMats = new HashMap<>();   // un matériau par glyphe (51-54)
+    private int splatFrame = -1;                                    // frame où l'éclaboussure a été posée
     private float redFlash;                                        // intensité du flash de coup (décroît)
     // audio (réutilise la pile host.Audio + MedPlayer + Sfx du port 2D ; JME audio désactivé)
     private Audio audio;
@@ -326,6 +332,16 @@ public final class Rebirth extends SimpleApplication {
         hudText.setColor(new ColorRGBA(0.85f, 0.55f, 1f, 1f));   // violet, comme Gloom
         guiNode.attachChild(hudText);
 
+        messText = new BitmapText(font);                          // message du jeu (health bonus!, etc.)
+        messText.setSize(font.getCharSet().getRenderedSize());
+        messText.setColor(ColorRGBA.White);
+        messText.setCullHint(Spatial.CullHint.Always);
+        guiNode.attachChild(messText);
+
+        splatQuad = new Geometry("splat", new Quad(1, 1));         // éclaboussure (texture posée au tir)
+        splatQuad.setCullHint(Spatial.CullHint.Always);
+        guiNode.attachChild(splatQuad);
+
         // voile rouge plein écran (équivalent de redpal : flash quand on encaisse, soutenu à la mort)
         redOverlay = new Geometry("dmg", new Quad(cam.getWidth(), cam.getHeight()));
         Material rm = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
@@ -334,6 +350,56 @@ public final class Rebirth extends SimpleApplication {
         redOverlay.setMaterial(rm);
         redOverlay.setCullHint(Spatial.CullHint.Always);
         guiNode.attachChild(redOverlay);                          // au-dessus : tout l'écran rougit
+    }
+
+
+    /**
+     * Message du jeu et éclaboussure de sang sur la vue, en 3D.
+     *
+     * Le moteur 2D dessine les deux dans son framebuffer (bloc message de drawscene, gloom.s:2693 ;
+     * bloc .done de drawblood, 5500) — un chemin que Rebirth ne suit pas. On les rejoue donc dans
+     * le guiNode : le texte centré à un quart de la hauteur comme printmess, et le glyphe
+     * d'éclaboussure (un des 4 de la fonte, tiré par {@link Splat} sur le second flux RNG) à sa
+     * position aléatoire, mis à l'échelle de la fenêtre. L'éclaboussure ne dure QU'UNE frame, comme
+     * dans l'original où la vue est redessinée à chaque tour.
+     */
+    private void updateMessAndSplat() {
+        float w = cam.getWidth(), h = cam.getHeight();
+        String mess = gloom.Mess.current(scene.player);
+        if (mess.isEmpty()) {
+            messText.setCullHint(Spatial.CullHint.Always);
+        } else {
+            messText.setText(mess);
+            messText.setLocalTranslation((w - messText.getLineWidth()) / 2f, h - h / 4f, 0);
+            messText.setCullHint(Spatial.CullHint.Inherit);
+        }
+        // l'éclaboussure : positions tirées dans la vue LOGIQUE (320×240) puis mises à l'échelle
+        if (Splat.take(FB_W, FB_H)) {
+            float k = w / FB_W;
+            splatQuad.setMaterial(splatMat(Splat.idx));
+            splatQuad.setLocalScale(Font.CW * k * 2f, Font.CH * k * 2f, 1f);
+            splatQuad.setLocalTranslation(Splat.x * k, h - Splat.y * k - Font.CH * k * 2f, 0);
+            splatQuad.setCullHint(Spatial.CullHint.Inherit);
+            splatFrame = frame;
+        } else if (frame != splatFrame) {
+            splatQuad.setCullHint(Spatial.CullHint.Always);       // une seule frame
+        }
+    }
+
+    /** Matériau (texturé par le glyphe) d'une des 4 éclaboussures, construit une fois pour toutes. */
+    private Material splatMat(int idx) {
+        return splatMats.computeIfAbsent(idx, k -> {
+            byte[] rgba = Font.glyphRGBA(k, 0xf00);
+            ByteBuffer buf = BufferUtils.createByteBuffer(rgba.length);
+            for (int row = Font.CH - 1; row >= 0; row--)          // flip V (guiNode : origine en bas)
+                buf.put(rgba, row * Font.CW * 4, Font.CW * 4);
+            buf.flip();
+            Material m = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+            m.setTexture("ColorMap", makeTex(buf, Font.CW, Font.CH));
+            m.setFloat("AlphaDiscardThreshold", 0.5f);
+            m.getAdditionalRenderState().setBlendMode(RenderState.BlendMode.Alpha);
+            return m;
+        });
     }
 
     /**
@@ -474,6 +540,7 @@ public final class Rebirth extends SimpleApplication {
             if (gh != lastGoreHash) { lastGoreHash = gh; renderGore(); }
             renderBlood();                              // gouttes de sang (le drawblood du 2D, en 3D)
             updateHud();
+            updateMessAndSplat();                       // message du jeu + éclaboussure de sang
             updateDamageFx();                           // flash rouge (coups) + rouge mort
         } else {
             game.render();                              // histoire / game over → framebuffer 2D
@@ -606,6 +673,7 @@ public final class Rebirth extends SimpleApplication {
         if (ceilGeom != null) ceilGeom.setCullHint(world);
         hpBar.setCullHint(world);
         hudText.setCullHint(playing ? Spatial.CullHint.Inherit : Spatial.CullHint.Always);
+        if (!playing) { messText.setCullHint(Spatial.CullHint.Always); splatQuad.setCullHint(Spatial.CullHint.Always); }
         if (!playing) redOverlay.setCullHint(Spatial.CullHint.Always);
         storyQuad.setCullHint(playing ? Spatial.CullHint.Always : Spatial.CullHint.Inherit);
     }

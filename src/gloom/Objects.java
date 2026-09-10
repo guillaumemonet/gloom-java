@@ -386,7 +386,9 @@ public final class Objects {
             case L_DEATHSUCK -> deathsuck(a5);
             case L_HOMEIN -> homeinlogic(a5);                     // missile à tête chercheuse du dragon
             case L_DRAGONDEAD -> dragondead(a5);                  // compte à rebours → fin de partie
-            case L_RTS, L_WEAPON, L_BOUNCY -> { /* item immobile (logique reportée) */ }
+            case L_WEAPON -> weaponlogic(a5);                     // arme au sol : flotte, tourne, scintille
+            case L_BOUNCY -> bouncylogic(a5);                     // bonus rebond : pulse
+            case L_RTS -> { /* health/thermo/infra/invisi/invinc : ob_logic = rts, vraiment immobiles */ }
             // L_MONSTER (marine) : IA générique chasse+tir
             default -> monsterlogic(a5);
         }
@@ -417,10 +419,14 @@ public final class Objects {
             case D_KILL -> killobject(hit);                       // balle morte (touchée / fin de course)
             case D_HEALTHGOT -> { if (isPlayer(attacker)) { token(); inchealth(attacker); } killobject(hit); }
             case D_WEAPONGOT -> { if (isPlayer(attacker)) { token(); weapond0(attacker, Mem.w(hit + Defs.ob_weapon)); } killobject(hit); }
-            case D_THERMOGOT -> { if (isPlayer(attacker)) { token(); addTimer(attacker, Defs.ob_thermo, 1500); } killobject(hit); } // thermo (et infra)
-            case D_INVISIGOT -> { if (isPlayer(attacker)) { token(); addTimer(attacker, Defs.ob_invisible, 1500); } killobject(hit); }
-            case D_INVINCGOT -> { if (isPlayer(attacker)) { token(); if (Mem.w(attacker + Defs.ob_hyper) == 0) Mem.ww(attacker + Defs.ob_hyper, -0x200); } killobject(hit); }
-            case D_BOUNCYGOT -> { if (isPlayer(attacker)) { token(); if (Mem.w(attacker + Defs.ob_bouncecnt) < 3) Mem.ww(attacker + Defs.ob_bouncecnt, Mem.w(attacker + Defs.ob_bouncecnt) + 1); } killobject(hit); }
+            case D_THERMOGOT -> { if (isPlayer(attacker)) { token(); addTimer(attacker, Defs.ob_thermo, 1500);
+                                  Mess.message(attacker, "got the thermo glasses!"); } killobject(hit); } // thermo (et infra)
+            case D_INVISIGOT -> { if (isPlayer(attacker)) { token(); addTimer(attacker, Defs.ob_invisible, 1500);
+                                  Mess.message(attacker, "invisibility!"); } killobject(hit); }
+            case D_INVINCGOT -> { if (isPlayer(attacker)) { token(); if (Mem.w(attacker + Defs.ob_hyper) == 0) Mem.ww(attacker + Defs.ob_hyper, -0x200);
+                                  Mess.message(attacker, "hyper!"); } killobject(hit); }
+            case D_BOUNCYGOT -> { if (isPlayer(attacker)) { token(); if (Mem.w(attacker + Defs.ob_bouncecnt) < 3) Mem.ww(attacker + Defs.ob_bouncecnt, Mem.w(attacker + Defs.ob_bouncecnt) + 1);
+                                  Mess.message(attacker, "bouncy bullets!"); } killobject(hit); }
             case D_BLOWOBJECT -> blowobject(hit);                 // sang + gibs + retrait
             case D_BLOWTERRA -> blowterra(hit);                   // robot : sfx différent, même gore
             case D_BLOWDRAGON -> blowdragon(hit);                 // dragon : explosion + fin de partie (gagné)
@@ -450,12 +456,21 @@ public final class Objects {
             Mem.ww(a5 + Defs.ob_weapon, d0);
             Mem.wb(a5 + Defs.ob_reload, IRELOAD);
             Mem.ww(a5 + Defs.ob_update, -1);
+            Mess.message(a5, "new weapon!");
             return;
         }
         int r = (Mem.ub(a5 + Defs.ob_reload) - 1) & 0xff;         // subq.b #1,ob_reload
-        if (r != 0) { Mem.wb(a5 + Defs.ob_reload, r); Mem.ww(a5 + Defs.ob_update, -1); return; } // tir plus rapide
+        if (r != 0) {                                             // tir plus rapide
+            Mem.wb(a5 + Defs.ob_reload, r);
+            Mess.message(a5, r == 1 ? "weapon boosted to full!" : "weapon boost!");
+            Mem.ww(a5 + Defs.ob_update, -1);
+            return;
+        }
         Mem.wb(a5 + Defs.ob_reload, 1);                           // rechargement maxé → mega
-        Mem.ww(a5 + Defs.ob_mega, M68k.w(Mem.w(a5 + Defs.ob_mega) + 250));
+        int mg = M68k.w(Mem.w(a5 + Defs.ob_mega) + 250);
+        Mem.ww(a5 + Defs.ob_mega, mg);
+        Mess.message(a5, Integer.compareUnsigned(mg, OK) < 0     // bcs .mwb
+                ? "mega weapon boost!" : "ultra mega overkill!!!");
     }
 
     /** inchealth (gloom.s:4636) : +5 PV, plafonné à 25. */
@@ -463,6 +478,7 @@ public final class Objects {
         int hp = Mem.w(a5 + Defs.ob_hitpoints) + 5;
         if (hp > 25) hp = 25;
         Mem.ww(a5 + Defs.ob_hitpoints, hp);
+        Mess.message(a5, "health bonus!");                        // bsr message DANS inchealth
         Mem.ww(a5 + Defs.ob_update, -1);
     }
 
@@ -932,6 +948,7 @@ public final class Objects {
         int rot = Maths.calcangle_(dx, dz) & 0xff;                 // calcangle : pointe vers le joueur
         Mem.ww(a5 + Defs.ob_rot, rot);
         int suckangle = Mem.l(Tables.camrots) + ((rot + 128) & 255) * 8;
+        Mem.wl(Vars.suckangle, suckangle);                         // move.l a3,suckangle (checksuck)
         for (int i = 0; i < 4; i++) addsoul(a5, player, suckangle);
     }
 
@@ -1081,6 +1098,69 @@ public final class Objects {
         Mem.wl(a5 + Defs.ob_zvec, zv);
         if (Player.checkvecs(a5)) calcbounce(a5);                 // bne calcbounce
         else putfire(a5);                                         // beq putfire
+    }
+
+
+    // ==================================================================
+    // Logique des objets à ramasser (gloom.s : weaponlogic 4382, bouncylogic 4739)
+    // ==================================================================
+
+    /**
+     * weaponlogic (gloom.s:4382) : une arme posée au sol FLOTTE, TOURNE et SCINTILLE.
+     *
+     * <ul>
+     *   <li>flottement : {@code ob_movspeed} sert de PHASE (+8 par frame) ; le sinus de
+     *       {@code camrots} (le mot d'offset 2, comme calcvecs) décalé de 8 donne {@code ob_y} ;</li>
+     *   <li>rotation : {@code ob_frame += ob_framespeed} en 32 bits, remis à 0 en fin d'anim
+     *       (les armes ont framespeed $8000 dans objinfo → elles tournent sur elles-mêmes) ;</li>
+     *   <li>scintillement : à l'expiration d'{@code ob_delay}, UNE étincelle {@code sparkslogic}
+     *       tirée de {@code ob_chunks}, frame au hasard, vitesses bloodspeed2, durée 15-30.</li>
+     * </ul>
+     * Utilisé par 6 entrées d'objinfo (weapon + weapon1..5).
+     */
+    public static void weaponlogic(int a5) {
+        int a0 = Mem.l(Tables.camrots);
+        int ms = M68k.w(Mem.w(a5 + Defs.ob_movspeed) + 8);        // addq #8,ob_movspeed
+        Mem.ww(a5 + Defs.ob_movspeed, ms);
+        Mem.ww(a5 + Defs.ob_y, Mem.w(a0 + (ms & 127) * 8 + 2) >> 8); // 2(a0,d0*8) ; asr #8 → ob_y
+
+        Mem.wl(a5 + Defs.ob_frame, Mem.l(a5 + Defs.ob_frame) + Mem.l(a5 + Defs.ob_framespeed));
+        int sh = Mem.l(a5 + Defs.ob_shape);
+        if (Integer.compareUnsigned(Mem.uw(a5 + Defs.ob_frame), Mem.uw(sh + 2)) >= 0)
+            Mem.ww(a5 + Defs.ob_frame, 0);                        // bcs .skip ; sinon clr ob_frame
+
+        int d = M68k.w(Mem.w(a5 + Defs.ob_delay) - 1);
+        Mem.ww(a5 + Defs.ob_delay, d);
+        if (d > 0) return;                                        // bgt .rts
+        rnddelay(a5);
+        int a2 = Mem.l(a5 + Defs.ob_chunks);
+        if (a2 == 0) return;                                      // pas de forme d'étincelle
+        int o = Lists.addlast(Vars.objects);
+        if (o == 0) return;                                       // beq .rts
+        Mem.wl(o + Defs.ob_x, Mem.l(a5 + Defs.ob_x));             // movem.l ob_x(a5),d2-d4
+        Mem.wl(o + Defs.ob_y, Mem.l(a5 + Defs.ob_y));
+        Mem.wl(o + Defs.ob_z, Mem.l(a5 + Defs.ob_z));
+        Mem.wl(o + Defs.ob_xvec, bloodspeed2());
+        Mem.wl(o + Defs.ob_yvec, bloodspeed2());
+        Mem.wl(o + Defs.ob_zvec, bloodspeed2());
+        Mem.wl(o + Defs.ob_shape, a2);
+        Mem.ww(o + Defs.ob_frame, Maths.rndn(Mem.uw(a2 + 2)));    // rndn(nb de frames)
+        Mem.wl(o + Defs.ob_logic, L_SPARKS);
+        Mem.wl(o + Defs.ob_render, R_DRAWSHAPE_1);
+        Mem.ww(o + Defs.ob_invisible, 0);
+        Mem.ww(o + Defs.ob_colltype, 0);
+        Mem.ww(o + Defs.ob_collwith, 0);
+        Mem.ww(o + Defs.ob_delay, (Maths.rndw() & 15) + 15);
+    }
+
+    /** Cycle de frames de bouncylogic (gloom.s:4745 `.bnc dc 3,4,3,5`). */
+    private static final int[] BNC = { 3, 4, 3, 5 };
+
+    /** bouncylogic (gloom.s:4739) : le bonus « balles rebondissantes » pulse sur les frames 3,4,3,5. */
+    public static void bouncylogic(int a5) {
+        int d = M68k.w(Mem.w(a5 + Defs.ob_delay) + 1);            // addq #1,ob_delay
+        Mem.ww(a5 + Defs.ob_delay, d);
+        Mem.ww(a5 + Defs.ob_frame, BNC[(d >> 1) & 3]);            // lsr #1 ; and #3
     }
 
     // ==================================================================

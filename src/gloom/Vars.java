@@ -97,6 +97,7 @@ public final class Vars {
     public static final int mode;          // dc 0 (7462) : mode d'affichage ; 0 → chunklogic2 (pas de gore au sol)
     public static final int sucking;       // dc.l 0 (3411) : joueur dont l'âme est aspirée ; 0 = aucun
     public static final int sucker;        // dc.l 0 (3410) : la deathhead qui aspire (cible des particules d'âme)
+    public static final int suckangle;     // dc.l 0 (3412) : entrée camrots du cap d'aspiration (checksuck)
     public static final int p1x, p1z, p1r; // dc 0 (7510) : position de spawn du joueur (pour respawn)
 
     // --- caméra (gloom.s:7613-7628) ---
@@ -217,6 +218,7 @@ public final class Vars {
         mode = Mem.alloc(2);
         sucking = Mem.alloc(4);
         sucker = Mem.alloc(4);
+        suckangle = Mem.alloc(4);
         p1x = Mem.alloc(2);
         p1z = Mem.alloc(2);
         p1r = Mem.alloc(2);

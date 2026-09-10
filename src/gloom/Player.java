@@ -13,7 +13,7 @@ import gloom.data.Tables;
  *  - adjustpos/adjustposq (5275/5260) : glissement le long du mur heurté ;
  *  - playerlogic (5134) : orchestration.
  *
- * STUBÉS (tours suivants) : playertimers (powerups), checksuck (deathhead), checkevent
+ * STUBÉS (tours suivants) : (aucun — playertimers, checksuck, checkevent et checkfire sont là)
  * (déclenchement de zones — portes), checkfire (tir → besoin de shoot/balles).
  *
  * Position candidate dans les "registres" d6/d7 (16.16), partagée par la chaîne (comme l'asm).
@@ -160,7 +160,7 @@ public final class Player {
             Mem.ww(a5 + Defs.ob_update, -1);
             redpal(a5);                                             // bra redpal
         }
-        // checksuck — reporté (deathhead)
+        checksuck(a5);                                          // aspiré par une deathhead ?
         checkevent(a5);                                         // dans une zone-trigger ?
         rotplayer(a5);
         moveplayer(a5);
@@ -359,21 +359,42 @@ public final class Player {
         return hit;
     }
 
+
+    /**
+     * checksuck (gloom.s:5092) : si une deathhead aspire l'âme de CE joueur, elle le TRAÎNE vers
+     * elle — 25 unités par frame le long de {@code suckangle} (le cap inverse du monstre, posé par
+     * deathsuck). La position visée passe par la même chaîne de collision que le déplacement
+     * normal : {@code checknewslow}, puis jusqu'à deux {@code adjustpos} pour glisser le long du
+     * mur heurté ; si ça bloque toujours, le joueur ne bouge pas (d6/d7 sont remis sur ob_x/ob_z).
+     */
+    private static void checksuck(int a5) {
+        if (Mem.l(Vars.sucking) != a5) return;                  // cmp.l sucking,a5 ; bne .nosuck
+        int a0 = Mem.l(Vars.suckangle);
+        if (a0 == 0) return;
+        d6 += -M68k.muls(25, Mem.w(a0 + 2));                    // muls 2(a0) ; neg.l ; add.l d0,d6
+        d7 += M68k.muls(25, Mem.w(a0 + 6));                     // muls 6(a0) ; add.l d1,d7
+        if (!checknewslow(a5)) { commit(a5); return; }           // beq .newok
+        if (!adjustpos(a5)) { commit(a5); return; }
+        if (!adjustpos(a5)) { commit(a5); return; }
+        d6 = Mem.l(a5 + Defs.ob_x);                              // bloqué : on annule le déplacement
+        d7 = Mem.l(a5 + Defs.ob_z);
+    }
+
     // ==================================================================
     // 08e — Événements & portes : playertimers + checkevent (gloom.s:4772/5039)
     // ==================================================================
 
     /**
      * playertimers (gloom.s:4772) : décompte les timers de powerups (mega/thermo/invisible/
-     * paltimer) et anime la téléportation/sortie (ob_pixsizeadd → ob_pixsize). Les messages HUD
-     * sont stubés (09). L'effet « hyper » (échelle deathhead/mort) est reporté (normalement 0).
+     * paltimer) et anime la téléportation/sortie (ob_pixsizeadd → ob_pixsize). Chaque timer qui
+     * atteint 0 pose son message d'expiration ({@link gloom.Mess}) — seul indice pour le joueur. L'effet « hyper » (échelle deathhead/mort) est reporté (normalement 0).
      */
     public static void playertimers(int a5) {
-        decTimer(a5, Defs.ob_mega);                             // mega weapon
-        decTimer(a5, Defs.ob_thermo);                           // thermo glasses
+        if (decTimer(a5, Defs.ob_mega)) Mess.message(a5, "mega weapon out...");
+        if (decTimer(a5, Defs.ob_thermo)) Mess.message(a5, "thermo glasses out...");
         int mt = Mem.w(a5 + Defs.ob_messtimer);                 // ob_messtimer (ble .notm ; subq #2)
         if (mt > 0) Mem.ww(a5 + Defs.ob_messtimer, mt - 2);
-        decTimer(a5, Defs.ob_invisible);                        // invisibility
+        if (decTimer(a5, Defs.ob_invisible)) Mess.message(a5, "invisibility out...");
 
         int pt = Mem.w(a5 + Defs.ob_paltimer);                  // ob_paltimer
         if (pt != 0) {
@@ -414,7 +435,10 @@ public final class Player {
                 if (Integer.compareUnsigned(hd0 & 0xffff, MAXSIZE) > 0) {
                     Mem.ww(a5 + Defs.ob_hyper, hd0);               // encore trop grand : pas de mise à l'échelle
                 } else {
-                    if ((hd0 & 0xffff) == MAXSIZE) hd0 = MAXSIZE;  // == maxsize : « hyper out »
+                    if ((hd0 & 0xffff) == MAXSIZE) {               // == maxsize : « hyper out »
+                        hd0 = MAXSIZE;
+                        Mess.message(a5, "hyper out...");
+                    }
                     int hd1 = hd0;
                     if (hd0 == 0x200) hd0 = 0;                     // retour à la taille normale → fin
                     hyperScale(a5, hd1);
@@ -436,10 +460,12 @@ public final class Player {
     }
 
     /** Décrémente un timer de powerup (effet retiré quand il atteint 0 ; message HUD stubé). */
-    private static void decTimer(int a5, int field) {
+    private static boolean decTimer(int a5, int field) {
         int v = Mem.w(a5 + field);
-        if (v == 0) return;
-        Mem.ww(a5 + field, M68k.w(v - 1));
+        if (v == 0) return false;                               // beq .no : pas de timer en cours
+        v = M68k.w(v - 1);
+        Mem.ww(a5 + field, v);
+        return v == 0;                                          // bne .no : message SEULEMENT à 0
     }
 
     /**

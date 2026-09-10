@@ -162,6 +162,11 @@ public final class LevelScene {
         if ((short) Mem.w(Vars.roofflag) > 0) Render.flat(-255 - camy, 1, Mem.w(Vars.miny), Mem.l(Vars.roof));
         Render.drawshapes();                              // sprites objets + strips see-through
         Render.drawblood();
+        int fb = Mem.l(Vars.cop);
+        Splat.drawInto(fb, width, height);                // scrnblood → éclaboussure sur la vue
+        // bloc message de drawscene (gloom.s:2693) : centré, à un quart de la hauteur (printmess)
+        String mess = gloom.Mess.current(player);
+        if (!mess.isEmpty()) Font.drawCentered(fb, width, height, height / 4, mess, 0xfff);
     }
 
     /**
