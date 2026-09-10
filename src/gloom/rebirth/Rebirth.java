@@ -61,6 +61,7 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -101,6 +102,10 @@ public final class Rebirth extends SimpleApplication {
     private static final int FB_W = 320, FB_H = 240;                // taille du framebuffer 2D de Game
     private final Node enemies = new Node("enemies");
     private final Node goreNode = new Node("gore");                  // décals de gore au sol (liste Vars.gore)
+    private Geometry bloodGeom;                                      // gouttes de sang (Vars.blood) : UN mesh
+    private FloatBuffer bloodPos, bloodCol;                          // buffers réutilisés (aucune alloc/frame)
+    /** Taille d'une goutte de sang, en unités gloom (le 2D n'en dessine qu'UN pixel). */
+    private static final float BLOOD_UNITS = 6f;
     private final Node walls = new Node("walls");                    // murs reconstruits chaque frame (portes animées)
     private final Map<Integer, Material> wallMatCache = new HashMap<>();
     private final Map<Integer, Material> doorMatCache = new HashMap<>();   // matériaux de portes (PolyOffset)
@@ -128,6 +133,9 @@ public final class Rebirth extends SimpleApplication {
     private float flash;                                             // intensité du flash (décroît)
     private boolean prevFire;                                        // front montant du tir
     private final List<Geometry> spritePool = new ArrayList<>();     // billboards réutilisés (pas de GC/frame)
+    private final List<Material[]> spriteMats = new ArrayList<>();   // par slot : {normal, translucide, invisible}
+    private final List<Geometry> thermoPool = new ArrayList<>();     // jumeaux « rayons X » (vision thermique)
+    private static final int SPR_NORM = 0, SPR_TRANS = 1, SPR_INVS = 2;   // cf. Render.OBJ_NORM/TRANS/INVS
     private Mesh unitQuad;                                           // quad unité partagé (mis à l'échelle)
     private int frame;
     // souris (mouselook) : delta X accumulé en PIXELS, sensibilité en unités-rot/pixel (-Dmousesens)
@@ -175,6 +183,7 @@ public final class Rebirth extends SimpleApplication {
         rootNode.attachChild(goreNode);
         enemies.setShadowMode(ShadowMode.Off);         // pas d'ombre carrée depuis les quads sprites
         goreNode.setShadowMode(ShadowMode.Off);
+        initBlood();                                   // mesh unique des gouttes de sang (cf. renderBlood)
 
         // éclairage de base volontairement bas → les point lights créent de vrais halos (ambiance)
         DirectionalLight sun = new DirectionalLight(new Vector3f(-0.4f, -0.9f, -0.3f).normalizeLocal(),
@@ -463,6 +472,7 @@ public final class Rebirth extends SimpleApplication {
             updateBulletLights();                       // balles → lumières dynamiques (murs + ennemis)
             long gh = goreHash();                       // idem : décals de gore reconstruits sur changement
             if (gh != lastGoreHash) { lastGoreHash = gh; renderGore(); }
+            renderBlood();                              // gouttes de sang (le drawblood du 2D, en 3D)
             updateHud();
             updateDamageFx();                           // flash rouge (coups) + rouge mort
         } else {
@@ -486,7 +496,7 @@ public final class Rebirth extends SimpleApplication {
     }
 
     // ----------------------------------------------------------------- menu OPTIONS
-    private static final int OPT_ROWS = 15;
+    private static final int OPT_ROWS = 16;
 
     private void updateOptions(boolean fire) {
         boolean u = kFwd, d = kBack, l = kLeft, r = kRight;
@@ -515,8 +525,10 @@ public final class Rebirth extends SimpleApplication {
                         if (right) opt.mouseSens = Math.min(0.50f, round2(opt.mouseSens + 0.02f)); }
             case 6 -> { if (left) opt.playerSpeed = Math.max(1.0f, round1(opt.playerSpeed - 0.1f));
                         if (right) opt.playerSpeed = Math.min(2.5f, round1(opt.playerSpeed + 0.1f)); }
-            case 7, 8, 9, 10, 11, 12, 13 -> { if (act) { awaitingKey = true; awaitRow = row; } }   // remap touche
-            case 14 -> { if (act) { opt.save(); inOptions = false; menu.init(FB_W, FB_H, true); } }  // back
+            case 7 -> { if (left) opt.particleScale = Math.max(0.5f, round2(opt.particleScale - 0.25f));
+                        if (right) opt.particleScale = Math.min(4.0f, round2(opt.particleScale + 0.25f)); }
+            case 8, 9, 10, 11, 12, 13, 14 -> { if (act) { awaitingKey = true; awaitRow = row; } }   // remap touche
+            case 15 -> { if (act) { opt.save(); inOptions = false; menu.init(FB_W, FB_H, true); } }  // back
         }
     }
 
@@ -566,13 +578,14 @@ public final class Rebirth extends SimpleApplication {
                 "FOV           " + (int) opt.fov,
                 "MOUSE SENS    " + String.format(java.util.Locale.US, "%.2f", opt.mouseSens),
                 "PLAYER SPEED  " + String.format(java.util.Locale.US, "%.1f", opt.playerSpeed),
-                keyRow("FORWARD", opt.kForward, 7),
-                keyRow("BACKWARD", opt.kBack, 8),
-                keyRow("TURN LEFT", opt.kLeft, 9),
-                keyRow("TURN RIGHT", opt.kRight, 10),
-                keyRow("STRAFE LEFT", opt.kStrafeL, 11),
-                keyRow("STRAFE RIGHT", opt.kStrafeR, 12),
-                keyRow("FIRE", opt.kFire, 13),
+                "PARTICLES     X" + String.format(java.util.Locale.US, "%.2f", opt.particleScale),
+                keyRow("FORWARD", opt.kForward, 8),
+                keyRow("BACKWARD", opt.kBack, 9),
+                keyRow("TURN LEFT", opt.kLeft, 10),
+                keyRow("TURN RIGHT", opt.kRight, 11),
+                keyRow("STRAFE LEFT", opt.kStrafeL, 12),
+                keyRow("STRAFE RIGHT", opt.kStrafeR, 13),
+                keyRow("FIRE", opt.kFire, 14),
                 "[ BACK ]"
         };
     }
@@ -588,6 +601,7 @@ public final class Rebirth extends SimpleApplication {
         walls.setCullHint(world);
         enemies.setCullHint(world);
         goreNode.setCullHint(world);
+        if (bloodGeom != null) bloodGeom.setCullHint(world);
         if (floorGeom != null) floorGeom.setCullHint(world);
         if (ceilGeom != null) ceilGeom.setCullHint(world);
         hpBar.setCullHint(world);
@@ -643,6 +657,8 @@ public final class Rebirth extends SimpleApplication {
         }
         for (int i = used; i < spritePool.size(); i++)   // masque les billboards en surplus (pool)
             spritePool.get(i).setCullHint(Spatial.CullHint.Always);
+        for (int i = used; i < thermoPool.size(); i++)   // idem pour les jumeaux thermiques
+            thermoPool.get(i).setCullHint(Spatial.CullHint.Always);
     }
 
     /**
@@ -689,9 +705,20 @@ public final class Rebirth extends SimpleApplication {
         int yh = (short) Mem.w(fb + 2);
         int w = Mem.uw(fb + 4), h = Mem.uw(fb + 6);
         if (w <= 0 || h <= 0 || w > 256 || h > 256) return false;
-        int scale = (Mem.l(obj + Defs.ob_render) == Objects.R_DRAWSHAPE_8) ? Mem.uw(obj + Defs.ob_scale) : 0x200;
+        // échelle : drawshape_1 = $200 FIXE ; drawshape_1sc (gibs) ET drawshape_8 = ob_scale (cf. Objects)
+        int render = Mem.l(obj + Defs.ob_render);
+        int scale = (render == Objects.R_DRAWSHAPE_1) ? 0x200 : Mem.uw(obj + Defs.ob_scale);
+        if (scale <= 0) scale = 0x200;
+        // étincelles d'impact et gibs : quelques pixels à l'origine, illisibles en 3D → grossis (option)
+        int logic = Mem.l(obj + Defs.ob_logic);
+        if (logic == Objects.L_SPARKS || logic == Objects.L_CHUNK)
+            scale = Math.max(1, Math.round(scale * opt.particleScale));
 
         Texture2D tex = spriteCache.computeIfAbsent(fb, k -> spriteTexture(fb));
+        // ob_invisible → shaperender, comme Objects.calcscene : 0 = normal, <0 = translucide
+        // (ghoul : ob_blood a le bit haut), >0 = « invisible » (powerup) qui n'assombrit que le fond.
+        int inv = (short) Mem.w(obj + Defs.ob_invisible);
+        int mode = inv == 0 ? SPR_NORM : (inv < 0 ? SPR_TRANS : SPR_INVS);
         float wW = w * scale / 256f * S, wH = h * scale / 256f * S;   // taille monde (JME)
         float ox = (short) Mem.w(obj + Defs.ob_x), oy = (short) Mem.w(obj + Defs.ob_y), oz = (short) Mem.w(obj + Defs.ob_z);
         // ancre : le pixel (xh,yh) du sprite est posé sur (ox,oy) ; billboard centré horizontalement
@@ -701,11 +728,63 @@ public final class Rebirth extends SimpleApplication {
         if (centerY - wH / 2f < 0f) centerY = wH / 2f;
 
         Geometry g = spriteSlot(slot);
-        g.getMaterial().setTexture("DiffuseMap", tex);
+        g.setMaterial(spriteMaterial(slot, mode, tex));
+        // translucide / invisible : bucket trié par distance (mélange correct) et pas d'écriture Z
+        g.setQueueBucket(mode == SPR_NORM ? RenderQueue.Bucket.Opaque : RenderQueue.Bucket.Transparent);
         g.setLocalScale(wW, wH, 1f);                   // quad unité mis à l'échelle (pas de Mesh recréé)
         g.setLocalTranslation(-ox * S, centerY, oz * S);   // X miroir
         g.setCullHint(Spatial.CullHint.Inherit);
+
+        // VISION THERMIQUE (Vars.thermo ← ob_thermo du joueur) : le 2D ne l'applique qu'au rendu
+        // NORMAL (drawobjnorm), pas aux sprites translucides/invisibles → même restriction ici.
+        boolean thermo = (short) Mem.w(Vars.thermo) != 0 && mode == SPR_NORM;
+        if (thermo || slot < thermoPool.size()) {      // pool alloué seulement si le powerup a servi
+            Geometry t = thermoSlot(slot);
+            t.setCullHint(thermo ? Spatial.CullHint.Inherit : Spatial.CullHint.Always);
+            if (thermo) {
+                t.getMaterial().setTexture("ColorMap", tex);
+                t.setLocalScale(wW, wH, 1f);
+                t.setLocalTranslation(-ox * S, centerY, oz * S);
+            }
+        }
         return true;
+    }
+
+    /**
+     * Jumeau « rayons X » du billboard {@code slot} pour la VISION THERMIQUE (powerup thermo).
+     *
+     * Le moteur d'origine (drawobjnorm, gloom.s:7331) teste le Z du mur colonne par colonne : si le
+     * sprite est DEVANT ({@code z < vd_z}) il le dessine normalement, sinon — et seulement si
+     * {@code thermo} est actif — il appelle {@code thermostrip} qui écrit {@code palette[texel] &
+     * $00f}, ne gardant que la composante BLEUE : une silhouette bleue à travers les murs.
+     *
+     * En 3D on obtient le même partage avec un second quad au même endroit, dont le test de
+     * profondeur est INVERSÉ ({@code depthFunc = Greater}) : il ne peint donc que là où le sprite
+     * normal est occulté, pixel par pixel au lieu de colonne par colonne. {@code Unshaded} multiplie
+     * la texture par {@code m_Color} : avec du bleu pur on garde exactement la composante bleue de
+     * chaque texel, l'équivalent du {@code & $00f}. Bucket transparent = dessiné APRÈS les murs
+     * (leur Z doit déjà être dans le tampon), sans écrire le Z à son tour.
+     */
+    private Geometry thermoSlot(int slot) {
+        while (slot >= thermoPool.size()) {
+            if (unitQuad == null) unitQuad = quadMesh(1f, 1f);
+            Geometry g = new Geometry("spr_thermo", unitQuad);
+            Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+            mat.setColor("Color", new ColorRGBA(0f, 0f, 1f, 1f));       // ne garde que le bleu (& $00f)
+            mat.setFloat("AlphaDiscardThreshold", 0.5f);                // découpe du sprite (texel 0)
+            RenderState rs = mat.getAdditionalRenderState();
+            rs.setFaceCullMode(RenderState.FaceCullMode.Off);
+            rs.setDepthFunc(RenderState.TestFunction.Greater);          // UNIQUEMENT la part occultée
+            rs.setDepthWrite(false);
+            g.setMaterial(mat);
+            g.setQueueBucket(RenderQueue.Bucket.Transparent);           // après les murs
+            g.setShadowMode(ShadowMode.Off);
+            g.addControl(new BillboardControl());
+            g.setCullHint(Spatial.CullHint.Always);
+            enemies.attachChild(g);
+            thermoPool.add(g);
+        }
+        return thermoPool.get(slot);
     }
 
     /** Renvoie le billboard du pool à cet indice, en l'allouant la première fois. */
@@ -713,20 +792,61 @@ public final class Rebirth extends SimpleApplication {
         while (slot >= spritePool.size()) {
             if (unitQuad == null) unitQuad = quadMesh(1f, 1f);
             Geometry g = new Geometry("spr", unitQuad);
-            // matériau ÉCLAIRÉ (au lieu d'Unshaded) → l'ennemi reçoit la lumière des balles/torche.
-            // Ambient élevé = sprite lumineux par défaut ; les point lights ajoutent par-dessus.
-            Material mat = new Material(assetManager, "Common/MatDefs/Light/Lighting.j3md");
-            mat.setBoolean("UseMaterialColors", true);
-            mat.setColor("Ambient", ColorRGBA.White.mult(0.9f));
-            mat.setColor("Diffuse", ColorRGBA.White);
-            mat.setFloat("AlphaDiscardThreshold", 0.5f);
-            mat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
-            g.setMaterial(mat);
             g.addControl(new BillboardControl());      // face toujours la caméra
             enemies.attachChild(g);
             spritePool.add(g);
+            spriteMats.add(new Material[3]);           // un matériau par mode, créé à la demande
         }
         return spritePool.get(slot);
+    }
+
+    /**
+     * Matériau du slot pour ce mode de rendu, texture posée. Un matériau porte sa texture : il en
+     * faut donc un par (slot, mode), créé à la demande et réutilisé ensuite (aucune alloc/frame).
+     */
+    private Material spriteMaterial(int slot, int mode, Texture2D tex) {
+        Material[] mats = spriteMats.get(slot);
+        if (mats[mode] == null) mats[mode] = newSpriteMaterial(mode);
+        // SPR_INVS est un Unshaded (noir semi-transparent) : le nom du paramètre de texture diffère
+        mats[mode].setTexture(mode == SPR_INVS ? "ColorMap" : "DiffuseMap", tex);
+        return mats[mode];
+    }
+
+    /**
+     * Les trois rendus de sprite du moteur d'origine (gloom.s : drawobjnorm / drawobjtrans /
+     * drawobjinvs, dispatchés par {@code sh_render} depuis {@code ob_invisible}) :
+     *
+     * <ul>
+     *   <li>{@code SPR_NORM} — texels opaques, matériau ÉCLAIRÉ (au lieu d'Unshaded) pour que
+     *       l'ennemi reçoive la lumière des balles/torche ; Ambient élevé = lumineux par défaut.</li>
+     *   <li>{@code SPR_TRANS} — {@code (texel&$eee + fond&$eee)>>1} : moitié sprite, moitié fond
+     *       → même matériau éclairé, alpha 0.5 en mélange additif classique.</li>
+     *   <li>{@code SPR_INVS} — {@code (fond&$eee)>>1} : le sprite ne montre PAS sa couleur, il
+     *       n'assombrit le fond que de moitié → sprite NOIR à alpha 0.5, ce qui donne
+     *       {@code 0.5*noir + 0.5*fond = fond/2}, exactement l'effet de l'original.</li>
+     * </ul>
+     * Dans les deux cas translucides le seuil de découpe alpha descend (sinon les texels à 0.5
+     * seraient jetés) et l'écriture du Z est coupée — le 2D ne teste que le Z des murs (vd_z).
+     */
+    private Material newSpriteMaterial(int mode) {
+        Material mat;
+        if (mode == SPR_INVS) {
+            mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+            mat.setColor("Color", new ColorRGBA(0f, 0f, 0f, 0.5f));   // noir à 50 % → fond/2
+        } else {
+            mat = new Material(assetManager, "Common/MatDefs/Light/Lighting.j3md");
+            mat.setBoolean("UseMaterialColors", true);
+            mat.setColor("Ambient", ColorRGBA.White.mult(0.9f));
+            mat.setColor("Diffuse", mode == SPR_TRANS ? new ColorRGBA(1f, 1f, 1f, 0.5f) : ColorRGBA.White);
+        }
+        mat.setFloat("AlphaDiscardThreshold", mode == SPR_NORM ? 0.5f : 0.05f);
+        RenderState rs = mat.getAdditionalRenderState();
+        rs.setFaceCullMode(RenderState.FaceCullMode.Off);
+        if (mode != SPR_NORM) {
+            rs.setBlendMode(RenderState.BlendMode.Alpha);
+            rs.setDepthWrite(false);
+        }
+        return mat;
     }
 
     /**
@@ -755,6 +875,82 @@ public final class Rebirth extends SimpleApplication {
             q.setLocalTranslation(-gx * S, 0.02f, gz * S);   // X miroir ; juste au-dessus du sol (anti z-fight)
             goreNode.attachChild(q);
         }
+    }
+
+    /**
+     * Crée le mesh UNIQUE des gouttes de sang : maxblood quads face-caméra, colorés par sommet.
+     * Positions/couleurs sont réécrites chaque frame dans les mêmes buffers (aucune allocation),
+     * les index sont figés une fois pour toutes → un seul draw call pour toute la gerbe.
+     */
+    private void initBlood() {
+        bloodPos = BufferUtils.createFloatBuffer(Vars.maxblood * 4 * 3);
+        bloodCol = BufferUtils.createFloatBuffer(Vars.maxblood * 4 * 4);
+        int[] idx = new int[Vars.maxblood * 6];
+        for (int i = 0; i < Vars.maxblood; i++) {
+            int v = i * 4, o = i * 6;
+            idx[o] = v; idx[o + 1] = v + 1; idx[o + 2] = v + 2;
+            idx[o + 3] = v; idx[o + 4] = v + 2; idx[o + 5] = v + 3;
+        }
+        Mesh m = new Mesh();
+        m.setBuffer(VertexBuffer.Type.Position, 3, bloodPos);
+        m.setBuffer(VertexBuffer.Type.Color, 4, bloodCol);
+        m.setBuffer(VertexBuffer.Type.Index, 3, BufferUtils.createIntBuffer(idx));
+        m.setStreamed();                                       // re-uploadé à chaque frame
+        bloodGeom = new Geometry("blood", m);
+        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        mat.setBoolean("VertexColor", true);                   // couleur = bl_color de la goutte
+        mat.getAdditionalRenderState().setFaceCullMode(RenderState.FaceCullMode.Off);
+        bloodGeom.setMaterial(mat);
+        bloodGeom.setShadowMode(ShadowMode.Off);
+        bloodGeom.setCullHint(Spatial.CullHint.Always);        // rien à montrer avant la 1re frame de jeu
+        rootNode.attachChild(bloodGeom);
+    }
+
+    /**
+     * Gouttes de sang projetées (liste {@code Vars.blood}, 128 max). Le moteur 2D les dessine en UN
+     * PIXEL chacune ({@code Render.drawblood}, appelé par {@code LevelScene.renderFrame}) ; Rebirth
+     * ne passe pas par ce chemin de rendu, d'où l'ABSENCE TOTALE de sang en 3D jusqu'ici : seuls les
+     * décals au sol (liste gore) étaient visibles. On remplit ici le mesh de quads face-caméra.
+     *
+     * Couleur : {@code bl_color} est le masque RVB 12 bits du monstre touché (ob_blood — $f00 rouge,
+     * $0f0 ghoul vert, $f0f lézard, $fff terra) ; le 2D l'applique en ET sur un gris (blcols, max
+     * $ccc), d'où le facteur 0.8 reproduit ici. Une goutte à {@code bl_color == 0} a déjà splatté
+     * l'écran. {@code bl_y} est négatif en vol, positif quand l'âme est aspirée (drawblood le nie
+     * alors) → on prend la valeur absolue.
+     */
+    private void renderBlood() {
+        float half = BLOOD_UNITS * opt.particleScale * 0.5f * S;
+        Vector3f right = cam.getLeft().negateLocal().multLocal(half);   // axes caméra (quad face-caméra)
+        Vector3f up = cam.getUp().multLocal(half);
+        bloodPos.rewind(); bloodCol.rewind();
+        int n = 0, b = Vars.blood;
+        while (n < Vars.maxblood) {
+            b = Mem.l(b);
+            if (Mem.l(b) == 0) break;                          // sentinelle (.succ == 0)
+            int mask = Mem.w(b + Defs.bl_color) & 0x0fff;
+            if (mask == 0) continue;                           // goutte déjà splattée sur l'écran
+            float cx = -(short) Mem.w(b + Defs.bl_x) * S;      // X miroir, comme toute la géométrie
+            float cy = Math.abs((short) Mem.w(b + Defs.bl_y)) * S;
+            float cz = (short) Mem.w(b + Defs.bl_z) * S;
+            bloodPos.put(cx - right.x - up.x).put(cy - right.y - up.y).put(cz - right.z - up.z);
+            bloodPos.put(cx + right.x - up.x).put(cy + right.y - up.y).put(cz + right.z - up.z);
+            bloodPos.put(cx + right.x + up.x).put(cy + right.y + up.y).put(cz + right.z + up.z);
+            bloodPos.put(cx - right.x + up.x).put(cy - right.y + up.y).put(cz - right.z + up.z);
+            float r = ((mask >> 8) & 15) / 15f * 0.8f;         // blcols[0] = $ccc → facteur 0.8
+            float g = ((mask >> 4) & 15) / 15f * 0.8f;
+            float bl = (mask & 15) / 15f * 0.8f;
+            for (int i = 0; i < 4; i++) bloodCol.put(r).put(g).put(bl).put(1f);
+            n++;
+        }
+        for (int i = n; i < Vars.maxblood; i++) {              // slots libres : quads d'aire nulle
+            for (int v = 0; v < 4; v++) bloodPos.put(0f).put(0f).put(0f);
+            for (int v = 0; v < 4; v++) bloodCol.put(0f).put(0f).put(0f).put(0f);
+        }
+        bloodPos.rewind(); bloodCol.rewind();
+        Mesh m = bloodGeom.getMesh();
+        m.getBuffer(VertexBuffer.Type.Position).updateData(bloodPos);
+        m.getBuffer(VertexBuffer.Type.Color).updateData(bloodCol);
+        m.updateBound();
     }
 
     /** Quad HORIZONTAL (plan XZ) centré, normale +Y — pour les décals de sol. */
@@ -836,6 +1032,8 @@ public final class Rebirth extends SimpleApplication {
         enemies.detachAllChildren();
         goreNode.detachAllChildren();
         spritePool.clear();
+        spriteMats.clear();                                        // en phase avec spritePool (indices)
+        thermoPool.clear();
         if (floorGeom != null) { floorGeom.removeFromParent(); floorGeom = null; }
         if (ceilGeom != null) { ceilGeom.removeFromParent(); ceilGeom = null; }
         for (PointLight pl : levelLights) rootNode.removeLight(pl);
@@ -1238,10 +1436,10 @@ public final class Rebirth extends SimpleApplication {
     /** Affecte le code touche capturé à l'action de la ligne d'options. */
     private void assignKey(int row, int code) {
         switch (row) {
-            case 7 -> opt.kForward = code;  case 8 -> opt.kBack = code;
-            case 9 -> opt.kLeft = code;     case 10 -> opt.kRight = code;
-            case 11 -> opt.kStrafeL = code; case 12 -> opt.kStrafeR = code;
-            case 13 -> opt.kFire = code;
+            case 8 -> opt.kForward = code;  case 9 -> opt.kBack = code;
+            case 10 -> opt.kLeft = code;    case 11 -> opt.kRight = code;
+            case 12 -> opt.kStrafeL = code; case 13 -> opt.kStrafeR = code;
+            case 14 -> opt.kFire = code;
         }
     }
 

@@ -22,6 +22,8 @@ public final class Options {
     public float fov = 100f;
     public float mouseSens = 0.18f;
     public float playerSpeed = 1.5f;
+    /** Grossissement des particules (sang / étincelles / gibs) : minuscules à l'échelle 3D. */
+    public float particleScale = 1.5f;
     // --- contrôles (codes JME KeyInput) ---
     public int kForward = KeyInput.KEY_W;
     public int kBack = KeyInput.KEY_S;
@@ -45,6 +47,7 @@ public final class Options {
         o.fov = sysFloat("fov", o.fov);                  // défauts depuis -D (compat)
         o.mouseSens = sysFloat("mousesens", o.mouseSens);
         o.playerSpeed = sysFloat("playerspeed", o.playerSpeed);
+        o.particleScale = sysFloat("particlescale", o.particleScale);
         try {
             Path f = file();
             if (Files.exists(f)) {
@@ -57,6 +60,7 @@ public final class Options {
                 o.fov = pFloat(p, "fov", o.fov);
                 o.mouseSens = pFloat(p, "mousesens", o.mouseSens);
                 o.playerSpeed = pFloat(p, "playerspeed", o.playerSpeed);
+                o.particleScale = pFloat(p, "particlescale", o.particleScale);
                 o.kForward = pInt(p, "kForward", o.kForward);
                 o.kBack = pInt(p, "kBack", o.kBack);
                 o.kLeft = pInt(p, "kLeft", o.kLeft);
@@ -80,6 +84,7 @@ public final class Options {
         p.setProperty("fov", "" + fov);
         p.setProperty("mousesens", "" + mouseSens);
         p.setProperty("playerspeed", "" + playerSpeed);
+        p.setProperty("particlescale", "" + particleScale);
         p.setProperty("kForward", "" + kForward);
         p.setProperty("kBack", "" + kBack);
         p.setProperty("kLeft", "" + kLeft);
