@@ -22,7 +22,7 @@ import java.util.Map;
  * Amiga donne la fréquence (horloge PAL 3546895/période), le PCM signé est converti en non-signé
  * (MONO8). Quatre « voies » (sources) avec priorité, comme `playsfx`. La musique MED n'est pas portée.
  */
-public final class Audio implements Sfx.Sink {
+public final class Audio implements gloom.AudioBackend {
 
     private static final int PAULA_CLOCK = 3546895;     // horloge Paula PAL (Hz)
     private static final int CHANNELS = 4;

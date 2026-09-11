@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,7 +23,7 @@ public final class Progress {
     private Progress() {}
 
     private static Path file() {
-        return Path.of(System.getProperty("user.home"), ".gloom-java", "progress");
+        return Paths.get(System.getProperty("user.home"), ".gloom-java", "progress");
     }
 
     /** Labels des points de contrôle, dans l'ordre du script (ex. ["GOTHIC TOMB", "HELL"]). */
@@ -31,7 +32,7 @@ public final class Progress {
         try {
             String s = new String(Assets.read("misc/script"), StandardCharsets.ISO_8859_1);
             for (String line : s.split("[\\n\\r]")) {
-                if (line.startsWith("rest_")) out.add(line.substring(5).trim().toUpperCase());
+                if (line.startsWith("rest_")) out.add(line.substring(5).trim().toUpperCase(java.util.Locale.ROOT));
             }
         } catch (IOException e) {
             // pas de script lisible → aucun point de contrôle
@@ -42,7 +43,9 @@ public final class Progress {
     /** Indice du dernier point déverrouillé (0 = aucun, 1 = 1er « rest_ », …). */
     public static int loadUnlocked() {
         try {
-            return Integer.parseInt(Files.readString(file()).trim());
+            // readString/writeString sont des API 33 sur Android : on reste sur readAllBytes/write,
+            // disponibles depuis l'API 26, pour que le moteur compile tel quel pour le portage Android.
+            return Integer.parseInt(new String(Files.readAllBytes(file()), StandardCharsets.UTF_8).trim());
         } catch (Exception e) {
             return 0;
         }
@@ -53,7 +56,7 @@ public final class Progress {
         if (checkpoint <= loadUnlocked()) return;
         try {
             Files.createDirectories(file().getParent());
-            Files.writeString(file(), Integer.toString(checkpoint));
+            Files.write(file(), Integer.toString(checkpoint).getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
             System.err.println("[Progress] sauvegarde impossible : " + e.getMessage());
         }

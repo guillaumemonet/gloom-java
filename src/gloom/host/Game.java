@@ -182,7 +182,7 @@ public final class Game {
     private void renderOver() {
         int fb = Mem.l(Vars.cop);
         fillBlack(fb);
-        Font.drawCenteredBig(fb, width, height, height / 2 - Font.CH * 2, endReason.toUpperCase(), 0xf00);
+        Font.drawCenteredBig(fb, width, height, height / 2 - Font.CH * 2, endReason.toUpperCase(java.util.Locale.ROOT), 0xf00);
         Font.drawCenteredBig(fb, width, height, height / 2 + 8, "PRESS FIRE", 0xff0);
     }
 

@@ -22,3 +22,6 @@ Thumbs.db
 *.class
 hs_err_pid*
 replay_pid*
+
+# Android : chemin du SDK propre a la machine
+local.properties

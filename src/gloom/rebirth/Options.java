@@ -5,6 +5,7 @@ import com.jme3.input.KeyInput;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Properties;
 
 /**
@@ -39,7 +40,7 @@ public final class Options {
     };
 
     private static Path file() {
-        return Path.of(System.getProperty("user.home"), ".gloom-java", "rebirth.properties");
+        return Paths.get(System.getProperty("user.home"), ".gloom-java", "rebirth.properties");
     }
 
     public static Options load() {

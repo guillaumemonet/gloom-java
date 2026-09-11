@@ -3,6 +3,8 @@ package gloom;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -29,9 +31,9 @@ public final class Assets {
     private static Path resolveRoot() {
         String prop = System.getProperty("gloom.assets");
         if (prop != null) {
-            return Path.of(prop);
+            return Paths.get(prop);
         }
-        return Path.of("..", "GloomAmiga");
+        return Paths.get("..", "GloomAmiga");
     }
 
     /**
@@ -108,12 +110,12 @@ public final class Assets {
             basenameIndex = new HashMap<>();
             try (var stream = Files.walk(root)) {
                 stream.filter(Files::isRegularFile).forEach(p ->
-                        basenameIndex.putIfAbsent(p.getFileName().toString().toLowerCase(), p));
+                        basenameIndex.putIfAbsent(p.getFileName().toString().toLowerCase(Locale.ROOT), p));
             } catch (IOException e) {
                 // index vide : on retombera sur le mode tolérant
             }
         }
-        return basenameIndex.get(base.toLowerCase());
+        return basenameIndex.get(base.toLowerCase(Locale.ROOT));
     }
 
     private static Path findCaseInsensitive(Path dir, String[] segments) {

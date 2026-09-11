@@ -1,0 +1,72 @@
+plugins {
+    id 'com.android.application' version '8.13.0'
+}
+
+/**
+ * Gloom sur Android — UN seul APK, les deux moteurs dedans : le rasteriseur 2D fidèle et la vue 3D
+ * jMonkeyEngine. Le launcher au démarrage choisit, comme sur desktop (`gradle run`).
+ *
+ * Les sources du moteur ne sont pas dupliquées : ../src est compilé tel quel.
+ */
+android {
+    namespace 'gloom.android'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'gloom.android'
+        minSdk 26                 // java.nio.file (Assets/Progress) exige API 26
+        targetSdk 34
+        versionCode 2
+        versionName '0.5'
+        ndk {
+            // jme3-android-native fournit 4 ABI ; on garde celles des téléphones réels
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
+    }
+
+    compileOptions {
+        // Le moteur n'utilise que des switch fléchés (Java 14) : D8 désucre sans problème.
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            // LES SOURCES DU MOTEUR SONT PARTAGÉES, pas copiées : ../src est compilé tel quel.
+            java.srcDirs = ['src/main/java', '../src']
+            java.excludes = [
+                    'gloom/tools/**',                  // harnais de dev : AWT/ImageIO, hors APK
+                    'gloom/host/Main.java',            // boucle GLFW    → GloomActivity/GameView
+                    'gloom/host/Display.java',         // fenêtre GLFW   → SurfaceView
+                    'gloom/host/Audio.java',           // OpenAL         → AndroidAudio
+                    'gloom/host/DisplayTest.java',
+                    'gloom/rebirth/DesktopGlue.java',  // GLFW + AWT : SEUL fichier 3D non portable
+            ]
+            manifest.srcFile 'src/main/AndroidManifest.xml'
+            res.srcDirs = ['src/main/res']
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false     // le moteur ne fait de réflexion que sur HostGlue, R8 n'apporte rien
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    packaging {
+        resources.excludes += ['META-INF/**']
+        jniLibs.useLegacyPackaging true       // les .so de jME viennent d'un JAR simple, pas d'un AAR
+    }
+}
+
+dependencies {
+    def jme = '3.6.1-stable'
+    implementation "org.jmonkeyengine:jme3-core:$jme"
+    implementation "org.jmonkeyengine:jme3-android:$jme"          // AndroidHarness + renderer GLES
+    implementation "org.jmonkeyengine:jme3-effects:$jme"          // FogFilter / BloomFilter
+    runtimeOnly "org.jmonkeyengine:jme3-android-native:$jme"      // .so : openalsoft, decode, bufferallocator
+}

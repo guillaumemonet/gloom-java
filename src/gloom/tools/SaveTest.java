@@ -5,6 +5,7 @@ import gloom.host.Progress;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 
 /**
@@ -25,7 +26,7 @@ public final class SaveTest {
         check("2e = HELL", labels.size() >= 2 && labels.get(1).contains("HELL"));
 
         // 2) round-trip de progression (avec sauvegarde/restauration du fichier réel)
-        Path f = Path.of(System.getProperty("user.home"), ".gloom-java", "progress");
+        Path f = Paths.get(System.getProperty("user.home"), ".gloom-java", "progress");
         String backup = Files.exists(f) ? Files.readString(f) : null;
         try {
             Files.deleteIfExists(f);

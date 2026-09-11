@@ -43,7 +43,6 @@ import com.jme3.texture.Texture;
 import com.jme3.texture.Texture2D;
 import com.jme3.texture.image.ColorSpace;
 import com.jme3.util.BufferUtils;
-import com.jme3.util.Screenshots;
 
 import gloom.Assets;
 import gloom.Defs;
@@ -53,14 +52,11 @@ import gloom.Sfx;
 import gloom.Vars;
 import gloom.data.ObjInfo;
 import gloom.data.Tables;
-import gloom.host.Audio;
 import gloom.host.Font;
 import gloom.host.Game;
 import gloom.host.LevelScene;
 import gloom.host.Splat;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
@@ -142,7 +138,8 @@ public final class Rebirth extends SimpleApplication {
     private int frame;
     // souris (mouselook) : delta X accumulé en PIXELS, sensibilité en unités-rot/pixel (-Dmousesens)
     private float mouseDX;
-    private long glfwWindow;                                        // handle GLFW (pour verrouiller le curseur)
+    /** Ce qui depend de la plateforme (curseur, taille framebuffer, capture) : desktop ou no-op. */
+    private final HostGlue glue = HostGlue.detect();
     // état des contrôles (held)
     private boolean kFwd, kBack, kLeft, kRight, kStrafeL, kStrafeR, kFire;
     // HUD
@@ -155,7 +152,7 @@ public final class Rebirth extends SimpleApplication {
     private int splatFrame = -1;                                    // frame où l'éclaboussure a été posée
     private float redFlash;                                        // intensité du flash de coup (décroît)
     // audio (réutilise la pile host.Audio + MedPlayer + Sfx du port 2D ; JME audio désactivé)
-    private Audio audio;
+    private gloom.AudioBackend audio;
 
     public static void main(String[] args) {
         Options o = Options.load();        // affichage/contrôles/confort persistés (~/.gloom-java/rebirth.properties)
@@ -267,19 +264,13 @@ public final class Rebirth extends SimpleApplication {
      * glfwGetCurrentContext() = la fenêtre JME (son contexte GL est courant sur ce thread de rendu).
      */
     private void grabCursor() {
-        if (glfwWindow == 0L) glfwWindow = org.lwjgl.glfw.GLFW.glfwGetCurrentContext();
-        if (glfwWindow != 0L
-                && org.lwjgl.glfw.GLFW.glfwGetInputMode(glfwWindow, org.lwjgl.glfw.GLFW.GLFW_CURSOR)
-                   != org.lwjgl.glfw.GLFW.GLFW_CURSOR_DISABLED) {
-            org.lwjgl.glfw.GLFW.glfwSetInputMode(glfwWindow,
-                    org.lwjgl.glfw.GLFW.GLFW_CURSOR, org.lwjgl.glfw.GLFW.GLFW_CURSOR_DISABLED);
-        }
+        glue.grabCursor();
     }
 
     private void initAudio() {
         try {
             Sfx.loadSamples();
-            audio = new Audio();
+            audio = glue.createAudio();
             Sfx.setSink(audio);
             audio.playMusic(loadModule("sfxs/med1"));
         } catch (Throwable t) {
@@ -299,7 +290,15 @@ public final class Rebirth extends SimpleApplication {
     }
 
     /** Brouillard d'ambiance (« Gloom » !) + ombres directionnelles. */
+    /**
+     * Ombres + brouillard + bloom. Coupable de l'exterieur ({@code postFx = false}) : sur GPU
+     * mobile ces passes sont le premier suspect en cas d'ecran noir ou de chute de framerate,
+     * et le reste du rendu n'en depend pas.
+     */
+    public static boolean postFx = true;
+
     private void setupPostFx(DirectionalLight sun) {
+        if (!postFx) return;
         rootNode.setShadowMode(ShadowMode.CastAndReceive);
         DirectionalLightShadowRenderer dlsr = new DirectionalLightShadowRenderer(assetManager, 512, 1);
         dlsr.setLight(sun);
@@ -429,12 +428,30 @@ public final class Rebirth extends SimpleApplication {
         hudText.setLocalTranslation(14, h - 36, 0);
     }
 
+    /**
+     * Entrée TACTILE (hôte Android) : injecte l'état des commandes là où le clavier/la souris
+     * l'écrivent sur desktop. Même surface exactement, donc aucun chemin de jeu ne change ;
+     * {@code lookDx} s'ajoute au delta de mouselook (en pixels, comme la souris).
+     */
+    private volatile boolean escRequested;      // « Échap » demandé par l'hôte tactile
+
+    /** Bouton MENU de l'hôte tactile : même effet qu'Échap (partie → menu → quitter). */
+    public void pressEscape() {
+        escRequested = true;
+    }
+
+    public void setTouchInput(boolean fwd, boolean back, boolean left, boolean right,
+                              boolean strafeL, boolean strafeR, boolean fire, float lookDx) {
+        kFwd = fwd; kBack = back; kLeft = left; kRight = right;
+        kStrafeL = strafeL; kStrafeR = strafeR; kFire = fire;
+        mouseDX += lookDx;
+    }
+
     @Override
     public void simpleUpdate(float tpf) {
         frame++;
         grabCursor();                                   // maintient le verrou souris (JME peut le relâcher)
-        if (glfwWindow != 0L) {                         // détecte le vrai framebuffer (plein écran/DPI) → relayout
-            org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(glfwWindow, fbW, fbH);
+        if (glue.framebufferSize(fbW, fbH)) {           // détecte le vrai framebuffer (plein écran/DPI)
             if (fbW[0] > 0 && fbH[0] > 0 && (fbW[0] != lastW || fbH[0] != lastH)) {
                 lastW = fbW[0]; lastH = fbH[0]; relayoutGui();
             }
@@ -442,13 +459,15 @@ public final class Rebirth extends SimpleApplication {
         boolean fire = kFire;
 
         // ----- ÉCHAP contextuel (on gère nous-mêmes, pas de quit brutal) -----
-        if (kEsc && !prevEsc) {
+        boolean escNow = kEsc || escRequested;      // touche OU bouton MENU de l'hôte tactile
+        escRequested = false;
+        if (escNow && !prevEsc) {
             if (awaitingKey) awaitingKey = false;                       // annule un remap en cours
             else if (inOptions) { opt.save(); inOptions = false; menu.init(FB_W, FB_H, true); }
             else if (inMenu) stop();                                    // menu → quitter
             else { inMenu = true; menu.init(FB_W, FB_H, true); }        // en jeu → retour menu
         }
-        prevEsc = kEsc;
+        prevEsc = escNow;
 
         // ----- MENU OPTIONS (overlay 2D plein écran) -----
         if (inOptions) {
@@ -613,7 +632,7 @@ public final class Rebirth extends SimpleApplication {
 
     /** Réajuste tout sur la VRAIE taille du framebuffer (plein écran/DPI) : viewports, overlays, FOV. */
     private void relayoutGui() {
-        org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(glfwWindow, fbW, fbH);
+        if (!glue.framebufferSize(fbW, fbH)) { fbW[0] = 0; fbH[0] = 0; }
         int w = Math.max(1, fbW[0] > 0 ? fbW[0] : cam.getWidth());   // jamais 0 → pas d'aspect NaN (crash GL)
         int h = Math.max(1, fbH[0] > 0 ? fbH[0] : cam.getHeight());
         renderManager.notifyReshape(w, h);              // recadre viewports 3D + GUI + post-effets sur w×h
@@ -1540,14 +1559,7 @@ public final class Rebirth extends SimpleApplication {
                 int w = cam.getWidth(), h = cam.getHeight();
                 ByteBuffer buf = BufferUtils.createByteBuffer(w * h * 4);
                 rm.getRenderer().readFrameBuffer(out, buf);
-                BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_4BYTE_ABGR);
-                Screenshots.convertScreenShot(buf, img);
-                for (int q = 0; q < w * h; q++) {
-                    int a = img.getRGB(q % w, q / w);
-                    img.setRGB(q % w, q / w, (a & 0xff00ff00) | ((a & 0xff) << 16) | ((a >> 16) & 0xff));
-                }
-                try { ImageIO.write(img, "png", new File("rebirth.png")); }
-                catch (Exception e) { System.err.println("[Rebirth] screenshot: " + e); }
+                glue.writePng(buf, w, h, "rebirth.png");
                 stop();
             }
             @Override public void cleanup() { }
