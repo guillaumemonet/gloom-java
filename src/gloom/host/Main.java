@@ -145,9 +145,10 @@ public final class Main {
         while (!disp.shouldClose() && !disp.key(GLFW_KEY_ESCAPE)) {
             int fb = Mem.l(Vars.cop);
             for (int i = 0; i < W * H; i++) Mem.ww(fb + i * 2, 0);
-            Font.drawCenteredBig(fb, W, H, H / 2 - 40, "GLOOM", 0xf00);
-            Font.drawCentered(fb, W, H, H / 2 - 4, "BLACK MAGIC SOFTWARE 1995", 0x0f0);
-            Font.drawCentered(fb, W, H, H / 2 + 8, "PORTAGE JAVA", 0x0ff);
+            Font.drawCenteredBig(fb, W, H, H / 2 - 46, "GLOOM", 0xf00);
+            Font.drawCentered(fb, W, H, H / 2 - 14, "BLACK MAGIC SOFTWARE 1995", 0x0f0);
+            Font.drawCentered(fb, W, H, H / 2 - 2, "PORTAGE JAVA - CLASSIC 2D", 0x0ff);
+            Font.drawCentered(fb, W, H, H / 2 + 12, "PORTED BY GUILLAUME MONET", 0xfd9);
             Font.drawCenteredBig(fb, W, H, H - 24, "PRESS FIRE", 0xff0);
             present(disp, fb);
             boolean fire = readJoyb(disp) != 0;

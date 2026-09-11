@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.view.MotionEvent;
+import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
@@ -271,9 +272,10 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
             if (pad.consumeMenuTap()) return;
             int fb = Mem.l(Vars.cop);
             for (int i = 0; i < W * H; i++) Mem.ww(fb + i * 2, 0);
-            Font.drawCenteredBig(fb, W, H, H / 2 - 40, "GLOOM", 0xf00);
-            Font.drawCentered(fb, W, H, H / 2 - 4, "BLACK MAGIC SOFTWARE 1995", 0x0f0);
-            Font.drawCentered(fb, W, H, H / 2 + 8, "PORTAGE JAVA", 0x0ff);
+            Font.drawCenteredBig(fb, W, H, H / 2 - 46, "GLOOM", 0xf00);
+            Font.drawCentered(fb, W, H, H / 2 - 14, "BLACK MAGIC SOFTWARE 1995", 0x0f0);
+            Font.drawCentered(fb, W, H, H / 2 - 2, "PORTAGE JAVA - ANDROID", 0x0ff);
+            Font.drawCentered(fb, W, H, H / 2 + 12, "PORTED BY GUILLAUME MONET", 0xfd9);
             Font.drawCenteredBig(fb, W, H, H - 24, "PRESS FIRE", 0xff0);
             present();
             boolean f = pad.fire();
@@ -330,19 +332,49 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
         frame.setPixels(argb, 0, W, 0, 0, W, H);
 
         if (surfaceReady) {
-            SurfaceHolder h = getHolder();
-            Canvas c = h.lockCanvas();
+            // Canvas MATÉRIEL : la mise à l'échelle 320x240 -> plein écran part sur le GPU. Avec
+            // lockCanvas() elle se fait au processeur (2,6 Mpx par image) et coûtait la moitié du
+            // framerate — donc la moitié de la vitesse du jeu, la logique tournant 1 frame sur 2.
+            Surface surface = getHolder().getSurface();
+            Canvas c = null;
+            boolean hw = true;
+            try {
+                c = surface.lockHardwareCanvas();
+            } catch (Throwable t) {
+                hw = false;
+            }
+            if (c == null) { hw = false; c = getHolder().lockCanvas(); }
             if (c != null) {
                 try {
                     c.drawColor(Color.BLACK);
                     c.drawBitmap(frame, null, dst, blit);
                     pad.draw(c);
                 } finally {
-                    h.unlockCanvasAndPost(c);
+                    if (hw) surface.unlockCanvasAndPost(c);
+                    else getHolder().unlockCanvasAndPost(c);
                 }
             }
         }
+        countFps();
         pace();
+    }
+
+    // --- mesure de cadence (diagnostic : passer a true pour tracer le framerate) ---
+    private static final boolean LOG_FPS = false;
+    private int fpsFrames;
+    private long fpsAt;
+
+    private void countFps() {
+        fpsFrames++;
+        long now = System.nanoTime();
+        if (fpsAt == 0) { fpsAt = now; return; }
+        if (now - fpsAt >= 2_000_000_000L) {
+            if (LOG_FPS) {
+                android.util.Log.i("gloomfps", String.format("fps=%.1f", fpsFrames * 1e9 / (now - fpsAt)));
+            }
+            fpsFrames = 0;
+            fpsAt = now;
+        }
     }
 
     /** Écran d'attente (téléchargement / erreur), avant que le moteur ne soit disponible. */
