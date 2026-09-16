@@ -4,6 +4,8 @@ build/
 
 # Sorties générées par les harnais de test (PNG de rendu, WAV de musique)
 *.png
+# ... sauf les captures du README, elles sont versionnees (pas de commentaire en fin de ligne ici)
+!docs/img/*.png
 *.wav
 
 # IDE / éditeurs
