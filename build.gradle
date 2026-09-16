@@ -431,7 +431,7 @@ def jpackageArgs = { String type ->
     [jpackageTool.absolutePath,
      '--type', type,
      '--name', 'Gloom',
-     '--app-version', '1.0',
+     '--app-version', '0.6',
      '--vendor', 'Guillaume Monet',
      '--copyright', 'Moteur (c) Black Magic Software 1995 - portage Java Guillaume Monet',
      '--description', 'Gloom - portage Java du moteur Amiga, par Guillaume Monet',

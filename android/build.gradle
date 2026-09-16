@@ -16,8 +16,8 @@ android {
         applicationId 'gloom.android'
         minSdk 26                 // java.nio.file (Assets/Progress) exige API 26
         targetSdk 34
-        versionCode 2
-        versionName '0.5'
+        versionCode 3
+        versionName '0.6'
         ndk {
             // jme3-android-native fournit 4 ABI ; on garde celles des téléphones réels
             abiFilters 'arm64-v8a', 'armeabi-v7a'
