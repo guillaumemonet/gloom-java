@@ -28,8 +28,20 @@ import gloom.rebirth.Rebirth;
  */
 public final class RebirthActivity extends AndroidHarness {
 
-    /** Mettre à true pour tenter ombres + brouillard + bloom (voir la note ci-dessus). */
-    private static final boolean POST_FX = false;
+    /**
+     * Effets actifs par défaut sur mobile : TOUS — mesure à l'appui.
+     *
+     * Le banc d'essai (scène figée, appareil de test) a montré que la géométrie ne compte pour rien
+     * (204 triangles, 27 draw calls : c'est un jeu de 1995) et que TOUT le coût est par pixel :
+     * 2,6 Mpx, un éclairage à 14 lumières, puis les passes plein écran. Le seul effet qui faisait
+     * déborder le budget de 16,6 ms était le BLOOM en pleine résolution — 45,6 fps contre 55,4 sans
+     * lui. En le calculant au quart de résolution on retombe à 55,9, soit le prix de ne pas l'avoir :
+     * le flou est par nature basse fréquence, le sous-échantillonner ne se voit quasiment pas.
+     */
+    private static final int DEFAULT_FX = Rebirth.FX_SHADOWS | Rebirth.FX_FOG | Rebirth.FX_BLOOM;
+
+    /** Bloom calculé au quart de résolution : même rendu, coût quasi nul (cf. ci-dessus). */
+    private static final float DEFAULT_BLOOM_DOWNSAMPLE = 4f;
 
     public RebirthActivity() {
         appClass = "gloom.rebirth.Rebirth";
@@ -53,9 +65,24 @@ public final class RebirthActivity extends AndroidHarness {
         File root = new File(getFilesDir(), "GloomAmiga");
         Assets.root = root.toPath();
         System.setProperty("user.home", root.getParentFile().getAbsolutePath());
-        Rebirth.postFx = POST_FX;
+        Rebirth.fxMask = getIntent().getIntExtra("fx", DEFAULT_FX);
+        Rebirth.logFps = getIntent().getBooleanExtra("fps", false);
+        Rebirth.bench = getIntent().getBooleanExtra("bench", false);
+        Rebirth.bloomDownsample = getIntent().getFloatExtra("bd", DEFAULT_BLOOM_DOWNSAMPLE);
+        Rebirth.maxLevelLights = getIntent().getIntExtra("lights", -1);
+        Rebirth.bloomIntensity = getIntent().getFloatExtra("bi", Rebirth.bloomIntensity);
+        Rebirth.bloomExposure = getIntent().getFloatExtra("be", Rebirth.bloomExposure);
 
         super.onCreate(state);                // crée le contexte GL et instancie Rebirth
+
+        // Banc d'essai : rendre a une resolution PLUS BASSE, le compositeur reetire a l'ecran.
+        // C'est le levier le plus direct quand le cout est par pixel (2,6 Mpx sur cet ecran).
+        float rs = getIntent().getFloatExtra("rs", 1f);
+        if (rs > 0f && rs < 0.999f && view != null) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            view.getHolder().setFixedSize(Math.max(320, (int) (dm.widthPixels * rs)),
+                                          Math.max(240, (int) (dm.heightPixels * rs)));
+        }
 
         // commandes tactiles PAR-DESSUS la surface GL
         Touch3d pad = new Touch3d(this, () -> (app instanceof Rebirth) ? (Rebirth) app : null);

@@ -223,11 +223,11 @@ public final class Rebirth extends SimpleApplication {
 
         // MENU TITRE → SÉQUENCEUR DE JEU COMPLET (host.Game : histoire + niveaux + fin + reprise).
         menu = new gloom.host.Menu();
-        if (HEADLESS) {                                // capture : démarre direct + saute l'intro
+        if (HEADLESS || bench) {                       // démarre direct dans le niveau, sans intro
             startGame(0);
             for (int i = 0; i < 60 && game.phase != Game.Phase.PLAYING; i++) { game.update(false); game.update(true); }
-            if (game.scene != null) { scene = lastScene = game.scene; loadLevelGeometry(); spawnDemoEnemy(); }
-            attachScreenshot();
+            if (game.scene != null) { scene = lastScene = game.scene; loadLevelGeometry(); }
+            if (HEADLESS) { spawnDemoEnemy(); attachScreenshot(); }
         } else {
             inMenu = true;
             menu.init(FB_W, FB_H, true);               // avec l'entrée OPTIONS (mode 3D)
@@ -290,31 +290,83 @@ public final class Rebirth extends SimpleApplication {
     }
 
     /** Brouillard d'ambiance (« Gloom » !) + ombres directionnelles. */
+    /** Effets activables séparément, pour pouvoir mesurer leur coût un à un. */
+    public static final int FX_SHADOWS = 1, FX_FOG = 2, FX_BLOOM = 4;
+
     /**
-     * Ombres + brouillard + bloom. Coupable de l'exterieur ({@code postFx = false}) : sur GPU
-     * mobile ces passes sont le premier suspect en cas d'ecran noir ou de chute de framerate,
-     * et le reste du rendu n'en depend pas.
+     * Effets de rendu actifs (masque de {@link #FX_SHADOWS}/{@link #FX_FOG}/{@link #FX_BLOOM}).
+     * Tout est actif par défaut, comme historiquement sur desktop ; l'hôte Android le règle
+     * au lancement, ces passes étant les plus coûteuses sur GPU mobile.
      */
-    public static boolean postFx = true;
+    public static int fxMask = FX_SHADOWS | FX_FOG | FX_BLOOM;
 
     private void setupPostFx(DirectionalLight sun) {
-        if (!postFx) return;
-        rootNode.setShadowMode(ShadowMode.CastAndReceive);
-        DirectionalLightShadowRenderer dlsr = new DirectionalLightShadowRenderer(assetManager, 512, 1);
-        dlsr.setLight(sun);
-        dlsr.setShadowIntensity(0.4f);
-        viewPort.addProcessor(dlsr);
+        if ((fxMask & FX_SHADOWS) != 0) {
+            rootNode.setShadowMode(ShadowMode.CastAndReceive);
+            DirectionalLightShadowRenderer dlsr = new DirectionalLightShadowRenderer(assetManager, 512, 1);
+            dlsr.setLight(sun);
+            dlsr.setShadowIntensity(0.4f);
+            viewPort.addProcessor(dlsr);
+        }
 
-        FilterPostProcessor fpp = new FilterPostProcessor(assetManager);
-        // brouillard SUBTIL (profondeur d'ambiance) : densité 1.2 faisait un « filtre » devant le joueur.
-        FogFilter fog = new FogFilter(new ColorRGBA(0.03f, 0.03f, 0.06f, 1f), 0.5f, 120f);
-        fpp.addFilter(fog);
-        // bloom : les zones brillantes (balles, panneaux émissifs, halos) « débordent » → look moderne.
-        BloomFilter bloom = new BloomFilter(BloomFilter.GlowMode.Scene);
-        bloom.setBloomIntensity(1.3f);
-        bloom.setExposurePower(2.2f);
-        fpp.addFilter(bloom);
-        viewPort.addProcessor(fpp);
+        FilterPostProcessor fpp = null;
+        if ((fxMask & FX_FOG) != 0) {
+            // brouillard SUBTIL (profondeur d'ambiance) : densité 1.2 faisait un « filtre » devant le joueur.
+            fpp = new FilterPostProcessor(assetManager);
+            fpp.addFilter(new FogFilter(new ColorRGBA(0.03f, 0.03f, 0.06f, 1f), 0.5f, 120f));
+        }
+        if ((fxMask & FX_BLOOM) != 0) {
+            // bloom : les zones brillantes (balles, panneaux émissifs, halos) « débordent » → look moderne.
+            if (fpp == null) fpp = new FilterPostProcessor(assetManager);
+            BloomFilter bloom = new BloomFilter(BloomFilter.GlowMode.Scene);
+            bloom.setBloomIntensity(bloomIntensity);
+            bloom.setExposurePower(bloomExposure);
+            // le bloom travaille sur une copie de l'écran : la sous-échantillonner divise d'autant
+            // le nombre de pixels des passes de flou — le principal levier de coût sur mobile.
+            if (bloomDownsample > 1f) bloom.setDownSamplingFactor(bloomDownsample);
+            fpp.addFilter(bloom);
+        }
+        if (fpp != null) viewPort.addProcessor(fpp);
+    }
+
+    /** Réglages du bloom — le desktop les veut francs, un écran de téléphone beaucoup moins. */
+    public static float bloomIntensity = 1.3f, bloomExposure = 2.2f, bloomDownsample = 1f;
+
+    /**
+     * Mode BANC D'ESSAI : démarre directement dans le niveau (sans intro ni menu) et GÈLE la
+     * simulation. La scène devient identique d'un lancement à l'autre, seul le réglage de
+     * rendu change — sans quoi on compare des situations différentes (monstres qui bougent,
+     * tirs, écrans d'histoire) et les mesures ne veulent rien dire.
+     */
+    public static boolean bench;
+
+    /** Banc d'essai : plafond des lumieres emissives du niveau (-1 = toutes). */
+    public static int maxLevelLights = -1;
+
+    // --- banc d'essai : trace de cadence (System.out arrive dans logcat sur Android) ---
+    public static boolean logFps;
+    private int fpsFrames;
+    private long fpsAt;
+
+    private void countFps() {
+        if (!logFps) return;
+        if (fpsAt == 0) renderManager.getRenderer().getStatistics().setEnabled(true);
+        fpsFrames++;
+        long now = System.nanoTime();
+        if (fpsAt == 0) { fpsAt = now; return; }
+        if (now - fpsAt >= 2_000_000_000L) {
+            // ce qui est REELLEMENT soumis au GPU : sommets, triangles, objets (= draw calls),
+            // plus le nombre de lumieres de la scene. C'est la qu'on voit le vrai cout.
+            com.jme3.renderer.Statistics st = renderManager.getRenderer().getStatistics();
+            int[] d = new int[st.getLabels().length];
+            st.getData(d);
+            System.out.println(String.format(
+                    "gloomfps fx=%d fps=%.1f sommets=%d triangles=%d objets=%d lumieres=%d",
+                    fxMask, fpsFrames * 1e9 / (now - fpsAt), d[0], d[1], d[3],
+                    levelLights.size() + 2 + BULLET_LIGHTS));
+            fpsFrames = 0;
+            fpsAt = now;
+        }
     }
 
     /** HUD overlay (guiNode) : barre de vie + texte PV/vies/arme. */
@@ -450,6 +502,7 @@ public final class Rebirth extends SimpleApplication {
     @Override
     public void simpleUpdate(float tpf) {
         frame++;
+        countFps();
         grabCursor();                                   // maintient le verrou souris (JME peut le relâcher)
         if (glue.framebufferSize(fbW, fbH)) {           // détecte le vrai framebuffer (plein écran/DPI)
             if (fbW[0] > 0 && fbH[0] > 0 && (fbW[0] != lastW || fbH[0] != lastH)) {
@@ -523,6 +576,7 @@ public final class Rebirth extends SimpleApplication {
         acc += Math.min(tpf, 0.25f);
         int steps = 0;
         LevelScene before = game.scene;
+        if (bench) steps = 6;                       // banc d'essai : simulation gelée, scène identique
         while (acc >= TICK_DT && steps < 6) {
             game.update(fire);
             acc -= TICK_DT; steps++;
@@ -1152,7 +1206,7 @@ public final class Rebirth extends SimpleApplication {
             float[] col = texLight.get(e.getKey());
             if (col == null) continue;                 // texture non émissive
             for (float[] w : e.getValue()) {
-                if (added >= 14) break;
+                if (added >= (maxLevelLights < 0 ? 14 : maxLevelLights)) break;
                 float cx = (w[0] + w[2]) / 2, cz = (w[1] + w[3]) / 2;
                 long cell = ((long) Math.round(cx / 384) << 20) ^ Math.round(cz / 384);
                 if (!usedCells.add(cell)) continue;    // déjà une lumière dans cette zone
