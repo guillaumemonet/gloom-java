@@ -1,266 +1,262 @@
-# Gloom — portage Java
+# Gloom — Java port
 
-Portage en Java de **Gloom** (Black Magic Software, Amiga 1995), le premier clone de Doom sorti
-sur Amiga. Le moteur est réécrit **ligne à ligne depuis l'assembleur 68020 d'origine**
-([earok/GloomAmiga](https://github.com/earok/GloomAmiga)) — pas d'émulateur, pas de
-réinterprétation : le code Java suit l'asm instruction par instruction, et les sources `.s`
-restent la référence en cas de doute.
+*Read this in [French](README_FR.md).*
 
-Le moteur d'origine est un rasteriseur logiciel qui « dessine » sa scène dans une **copperlist** :
-un poke de registre couleur par pixel, que le copper Amiga rejoue à l'écran. Le portage jette ce
-chemin d'affichage — il rend dans un framebuffer RGB classique — et garde ce qui compte : la
-mémoire, l'arithmétique, les formats de données et les règles du jeu, prises dans l'assembleur
-plutôt que redevinées.
+A Java port of **Gloom** (Black Magic Software, Amiga 1995), the first Doom clone to ship on the
+Amiga. The engine is rewritten **line by line from the original 68020 assembly**
+([earok/GloomAmiga](https://github.com/earok/GloomAmiga)) — no emulator, no reinterpretation: the
+Java code follows the asm instruction by instruction, and the `.s` sources stay the reference
+whenever something is in doubt.
 
-![Écran titre](docs/img/ecran-titre.png)
+The original engine is a software rasteriser that "draws" its scene into a **copperlist**: one
+colour-register poke per pixel, replayed to the screen by the Amiga copper. The port throws that
+display path away — it renders into a plain RGB framebuffer — and keeps what matters: the memory,
+the arithmetic, the data formats and the game rules, taken from the assembly rather than guessed
+at again.
 
-Porté par **Guillaume Monet**.
+![Title screen](docs/img/ecran-titre.png)
+
+Ported by **Guillaume Monet**.
 
 ---
 
-## Deux moteurs, une seule simulation
+## Two renderers, one simulation
 
-Au lancement, un écran propose deux rendus. Ils partagent **exactement** le même code de jeu :
-même RAM 68k émulée, mêmes listes d'objets, même IA, même script de campagne. Seul l'affichage
-change.
+A launcher offers two views at startup. They share **exactly** the same game code: the same
+emulated 68k RAM, the same object lists, the same AI, the same campaign script. Only the display
+changes.
 
 | | **GLOOM CLASSIC** | **GLOOM REBIRTH** |
 |---|---|---|
-| rendu | le rasteriseur d'origine, porté | scène 3D réelle (jMonkeyEngine) |
-| résolution interne | 320 × 240 | celle de l'écran |
-| ce qu'on y gagne | la fidélité au pixel | éclairage dynamique, ombres, bloom, mouselook |
+| rendering | the original rasteriser, ported | a real 3D scene (jMonkeyEngine) |
+| internal resolution | 320 × 240 | the screen's own |
+| what you get | pixel fidelity | dynamic lighting, shadows, bloom, mouselook |
 
 | CLASSIC (2D) | REBIRTH (3D) |
 |---|---|
 | ![Gloom Classic](docs/img/classic-2d.png) | ![Gloom Rebirth](docs/img/rebirth-3d.png) |
 
-Le HUD, les menus et les écrans d'histoire sont ceux du jeu, décodés depuis ses propres données
-(images IFF, fonte Amiga à 7 plans) :
+The HUD, the menus and the story screens are the game's own, decoded from its own data (IFF
+images, 7-plane Amiga font):
 
-| HUD en jeu | Écran d'histoire |
+| In-game HUD | Story screen |
 |---|---|
-| ![HUD](docs/img/classic-hud.png) | ![Écran d'histoire](docs/img/ecran-histoire.png) |
+| ![HUD](docs/img/classic-hud.png) | ![Story screen](docs/img/ecran-histoire.png) |
 
-Deux variantes du rasteriseur sont portées : `gloom.s` (chunky, `focshft 6`, FOV large) et
-`gloom2.s` (planaire/AGA, `focshft 7` + `castrots128`, projection « Deluxe » moins déformée).
-Elles partagent le même rasteriseur : seules la focale et la table de rayons changent.
-
----
-
-## Les choix du portage
-
-### La RAM 68k comme un simple tableau d'octets
-
-Toute la mémoire du jeu est **un `byte[]` de 64 Mo, gros-boutiste et plat** (`gloom.Mem`). Les
-registres `d0-d7`/`a0-a6` deviennent des `int`, et tous les accès passent par des helpers typés
-(`Mem.b/w/l`, `ub/uw`, `wb/ww/wl`) qui reproduisent l'ordre des octets et l'arithmétique du 68k.
-`gloom.M68k` fait le reste (`swap`, `muls/mulu`, `divs/divu`, extensions de signe, décalages `.w`).
-
-C'est ce qui rend le portage ligne à ligne possible : une structure de l'asm reste à **la même
-adresse et au même offset** qu'à l'origine, y compris ses bizarreries. Et il y en a — dans Gloom,
-`ob_nxvec` et `ob_lives` sont le **même mot** (`rs.w 0`), tout comme `ob_nzvec` et `ob_infra`.
-Un portage « propre » aurait séparé ces champs et cassé silencieusement le jeu.
-
-Le garde-fou : `gradle checkLayout` vérifie que chaque offset de structure correspond au fichier
-`.s`. Il doit afficher `TOUT OK`.
-
-### Ce qui n'est PAS porté : la couche matérielle
-
-Le copper, le blitter, la C2P, les registres audio Paula et les interruptions CIA n'ont pas
-d'équivalent utile ici. À la place, une **couche hôte** mince : LWJGL 3 (GLFW/OpenGL/OpenAL) sur
-PC, les API Android sur téléphone. Le moteur ne la connaît pas.
-
-Le découplage est réel et mesurable : sur les ~13 500 lignes du portage, seuls **quatre fichiers**
-dépendent de LWJGL (`host/Main`, `host/Display`, `host/Audio`, `rebirth/DesktopGlue`), et l'APK
-Android compile les **mêmes sources** que le desktop, sans une ligne dupliquée. Deux interfaces
-suffisent à isoler le reste :
-
-- `HostGlue` — les trois choses de la vue 3D qui ne sont pas portables (verrou du curseur et taille
-  du framebuffer via GLFW, écriture d'une capture PNG via AWT) ;
-- `AudioBackend` — OpenAL sur PC, `AudioTrack` sur Android.
-
-### L'audio refait à la manière de Paula
-
-Le son n'est pas délégué à une bibliothèque de plus haut niveau. Les échantillons sont au format
-Gloom (`[période][longueur en mots][PCM 8 bits signé]`), et la **période Paula** donne la fréquence
-de lecture (`3546895 / période`). Côté Android, les 4 voies DMA sont rejouées à la main, avec un
-pas en virgule fixe 16.16 et les mêmes règles d'attribution de voie (une libre, sinon la moins
-prioritaire, sinon rien) — puis mixées avec la musique dans un unique flux.
-
-La musique MED (MMD0/MMD1) est un lecteur écrit pour le portage : séquenceur + mixeur 4 voies,
-le replayer d'origine étant un blob 68k non portable.
-
-### Une seule simulation pour les deux rendus
-
-La vue 3D n'est pas un second jeu. Elle **lit l'état du monde dans la RAM 68k** à chaque frame et
-le traduit en scène jMonkeyEngine : murs extrudés depuis les zones de la map, sprites d'origine en
-billboards (avec la sélection de frame à 8 directions), décals de gore au sol, gouttes de sang en
-un seul mesh. La simulation tourne à pas de temps fixe (1/60 s), donc le gameplay garde sa vitesse
-quel que soit le framerate.
-
-### Android : ce que la mesure a appris
-
-Le portage tourne sur téléphone (mesuré sur un Xiaomi : 60 images/s en 2D, ~55 en 3D). Deux
-constats non évidents, obtenus en instrumentant plutôt qu'en devinant :
-
-- **La 2D tournait à moitié vitesse** parce que `lockCanvas()` rend un canvas *logiciel* :
-  l'agrandissement du framebuffer 320 × 240 vers le plein écran se faisait au processeur.
-  `Surface.lockHardwareCanvas()` a suffi (35 → 60 images/s).
-- **En 3D, la géométrie ne coûte rien** — 204 triangles, 27 appels de dessin : c'est bien un jeu de
-  1995. Tout le coût est *par pixel* : 2,6 Mpx contre 0,077 sur Amiga, avec un éclairage à 14
-  lumières. Le seul effet qui faisait déborder le budget d'image était le **bloom en pleine
-  résolution** ; le calculer au quart de résolution le rend gratuit sans changer son aspect.
+Two variants of the rasteriser are ported: `gloom.s` (chunky, `focshft 6`, wide FOV) and `gloom2.s`
+(planar/AGA, `focshft 7` + `castrots128`, the less distorted "Deluxe" projection). They share the
+same rasteriser — only the focal length and the ray table differ.
 
 ---
 
-## Ce qui marche
+## Porting decisions
 
-- Les **niveaux s'enchaînent** : écran-titre, menu, écrans d'histoire, campagne complète pilotée
-  par le script d'origine, points de contrôle et reprise (« CONTINUE FROM… »).
-- **Déplacement et collision** suivant les règles de l'asm (glissement le long des murs, écrasement),
-  tir des cinq armes avec leurs dégâts, cadences et sons.
-- **IA par type** : marine, baldy, terra, ghoul, phantom, demon, lizard, troll — chacun a sa logique
-  d'origine (charge, tir, esquive). Boss : le dragon (cercles + missiles à tête chercheuse) et la
-  deathhead (aspiration d'âme, qui traîne le joueur vers elle).
-- **Gore complet** : étincelles d'impact, 24 gouttes de sang *à chaque coup encaissé*, gibs avec
-  gravité, décals persistants au sol, éclaboussure sur la vue quand une goutte frôle la caméra.
-- Les monstres **bronchent** quand on les touche : sonnés et intouchables un court instant.
-- **Powerups** : arme, thermo, invisibilité, invincibilité « hyper », balles rebondissantes, avec
-  leurs timers, leurs messages et leurs avertissements d'expiration.
-- **Géométrie dynamique** : portes, polygones en rotation, animations de textures, zones-trigger
-  (embuscades, téléports, sortie).
-- **Audio** : tous les effets, les voix d'ambiance des monstres, et la musique MED.
-- **Vue 3D** : éclairage dynamique (torche, flash de bouche, balles), textures HD optionnelles,
-  vision thermique à travers les murs, menu d'options persistant, contrôles remappables.
-- **Android** : un seul APK, les deux moteurs, commandes tactiles, assets récupérés au premier
-  lancement.
+### 68k RAM as a plain byte array
 
-## Ce qui manque
+All of the game's memory is **one flat, big-endian 64 MB `byte[]`** (`gloom.Mem`). Registers
+`d0-d7`/`a0-a6` become `int`s, and every access goes through typed helpers (`Mem.b/w/l`, `ub/uw`,
+`wb/ww/wl`) that reproduce 68k byte order and arithmetic. `gloom.M68k` covers the rest (`swap`,
+`muls/mulu`, `divs/divu`, sign extension, `.w` shifts).
 
-- Le **mode 2 joueurs** (lien série modem) et le chat — hors périmètre, comme le reste de `ap.s`.
-- Le **mini-jeu Defender** (`combatok`).
-- Le fondu du volume de la musique entre les niveaux (`fadevol`).
-- Les sons de coup sont fidèles, mais les **voix d'ambiance** de quelques monstres restent à vérifier
-  en situation.
-- `ob_infra` : vestige de l'original — le bonus « infrarouge » y donne en réalité les lunettes
-  thermo, et la variable n'est lue nulle part. Reproduit tel quel.
+This is what makes the line-by-line port possible: a struct from the asm stays at **the same
+address and the same offset** it had originally, quirks included. And there are quirks — in Gloom,
+`ob_nxvec` and `ob_lives` are the **same word** (`rs.w 0`), as are `ob_nzvec` and `ob_infra`. A
+"clean" port would have split those fields and broken the game silently.
+
+The safety net: `gradle checkLayout` checks every struct offset against the `.s` file. It has to
+print `TOUT OK`.
+
+### What is NOT ported: the hardware layer
+
+The copper, the blitter, C2P, the Paula audio registers and the CIA interrupts have no useful
+equivalent here. In their place sits a thin **host layer**: LWJGL 3 (GLFW/OpenGL/OpenAL) on PC,
+the Android APIs on phones. The engine knows nothing about it.
+
+The decoupling is real and measurable: out of the port's ~13,500 lines, only **four files** depend
+on LWJGL (`host/Main`, `host/Display`, `host/Audio`, `rebirth/DesktopGlue`), and the Android APK
+compiles the **same sources** as the desktop build, without a single duplicated line. Two
+interfaces isolate the rest:
+
+- `HostGlue` — the three things in the 3D view that aren't portable (cursor lock and framebuffer
+  size via GLFW, PNG screenshot writing via AWT);
+- `AudioBackend` — OpenAL on PC, `AudioTrack` on Android.
+
+### Audio rebuilt the way Paula did it
+
+Sound isn't handed off to some higher-level library. The samples are in Gloom's own format
+(`[period][length in words][signed 8-bit PCM]`), and the **Paula period** gives the playback
+frequency (`3546895 / period`). On Android the 4 DMA voices are replayed by hand, with a 16.16
+fixed-point step and the same voice-allocation rules (a free one, else the least prioritary one,
+else nothing) — then mixed with the music into a single stream.
+
+The MED music (MMD0/MMD1) is a player written for this port: sequencer plus 4-voice mixer, the
+original replayer being a non-portable 68k blob.
+
+### One simulation behind both renderers
+
+The 3D view isn't a second game. It **reads the world state out of the 68k RAM** every frame and
+translates it into a jMonkeyEngine scene: walls extruded from the map's zones, the original sprites
+as billboards (with the 8-direction frame selection), gore decals on the floor, blood drops as a
+single mesh. The simulation runs on a fixed timestep (1/60 s), so gameplay keeps its speed whatever
+the framerate is.
+
+### Android: what measuring taught us
+
+The port runs on a phone (measured on a Xiaomi: 60 fps in 2D, ~55 in 3D). Two non-obvious findings,
+reached by instrumenting rather than guessing:
+
+- **The 2D ran at half speed** because `lockCanvas()` hands back a *software* canvas: scaling the
+  320 × 240 framebuffer up to fullscreen was happening on the CPU. `Surface.lockHardwareCanvas()`
+  was all it took (35 → 60 fps).
+- **In 3D, geometry costs nothing** — 204 triangles, 27 draw calls: this really is a 1995 game. All
+  of the cost is *per pixel*: 2.6 Mpx against 0.077 on the Amiga, with 14-light lighting. The only
+  effect that pushed past the frame budget was **full-resolution bloom**; computing it at quarter
+  resolution makes it free without changing how it looks.
 
 ---
 
-## Lancer le jeu
+## What works
 
-### Depuis les sources
+- **Levels chain together**: title screen, menu, story screens, the full campaign driven by the
+  original script, checkpoints and resume ("CONTINUE FROM…").
+- **Movement and collision** following the asm's rules (sliding along walls, crushing), all five
+  weapons firing with their own damage, rates and sounds.
+- **AI per type**: marine, baldy, terra, ghoul, phantom, demon, lizard, troll — each with its
+  original logic (charge, fire, dodge). Bosses: the dragon (circling plus homing missiles) and the
+  deathhead (soul suck, which drags the player towards it).
+- **Full gore**: impact sparks, 24 blood drops *on every hit taken*, gibs with gravity, persistent
+  floor decals, a splat on the view when a drop grazes the camera.
+- Monsters **flinch** when hit: stunned and untouchable for a moment.
+- **Powerups**: weapon, thermo, invisibility, "hyper" invincibility, bouncy bullets, with their
+  timers, their messages and their expiry warnings.
+- **Dynamic geometry**: doors, rotating polygons, texture animations, trigger zones (ambushes,
+  teleports, exit).
+- **Audio**: every effect, the monsters' ambient voices, and the MED music.
+- **3D view**: dynamic lighting (torch, muzzle flash, bullets), optional HD textures, thermal vision
+  through walls, a persistent options menu, remappable controls.
+- **Android**: a single APK with both renderers, touch controls, assets fetched on first run.
 
-Il faut le dépôt d'assets **à côté** de celui-ci (les assets ne sont pas redistribuables, voir
-plus bas) :
+## What's missing
+
+- **2-player mode** (serial modem link) and the chat — out of scope, like the rest of `ap.s`.
+- The **Defender mini-game** (`combatok`).
+- The music volume fade between levels (`fadevol`).
+- Hit sounds are faithful, but a few monsters' **ambient voices** still need checking in situ.
+- `ob_infra`: a leftover from the original — the "infrared" bonus actually hands you the thermo
+  goggles, and the variable is never read anywhere. Reproduced as is.
+
+---
+
+## Running the game
+
+### From source
+
+You need the asset repository **next to** this one (the assets aren't redistributable, see below):
 
 ```
 Gloom/
 ├── GloomAmiga/     ← git clone https://github.com/earok/GloomAmiga
 └── gloom-java/
-    └── java/       ← ce projet Gradle
+    └── java/       ← this Gradle project
 ```
 
-Puis, depuis `java/` :
+Then, from `java/`:
 
 ```bash
-gradle run                        # partie complète (launcher 2D / 3D)
-gradle run2                       # variante gloom2.s (focshft 7 + castrots128)
-gradle rebirth                    # vue 3D directement
-gradle run -Dscale=4              # fenêtre plus grande (interne 320×240)
-gradle run -Dmap=map1_3 -Dtile=1  # un seul niveau (test/visite)
+gradle run                        # full game (2D / 3D launcher)
+gradle run2                       # the gloom2.s variant (focshft 7 + castrots128)
+gradle rebirth                    # straight into the 3D view
+gradle run -Dscale=4              # bigger window (320×240 internally)
+gradle run -Dmap=map1_3 -Dtile=1  # a single level (testing / sightseeing)
 ```
 
-Options : `-Dw= -Dh= -Dscale= -Dmap= -Dtile= -Dengine=gloom2 -Dmedspeed= -Dgloom.assets=`.
+Options: `-Dw= -Dh= -Dscale= -Dmap= -Dtile= -Dengine=gloom2 -Dmedspeed= -Dgloom.assets=`.
 
-**Prérequis** : JDK 21 (la toolchain Gradle est figée dessus, et `jpackage` en vient), Gradle 9.x.
-Les natives LWJGL sont réglées sur Windows x64 ; pour Linux/macOS, changez `lwjglNatives` dans
-`build.gradle` et construisez **sur la plateforme cible**.
+**Requirements**: JDK 21 (the Gradle toolchain is pinned to it, and `jpackage` comes from it),
+Gradle 9.x. The LWJGL natives are set to Windows x64; for Linux/macOS, change `lwjglNatives` in
+`build.gradle` and build **on the target platform**.
 
-**Contrôles** — `W`/`S` ou `↑`/`↓` avancer/reculer, `A`/`D` pas de côté, `←`/`→` tourner, clic
-gauche / `Ctrl` / `Espace` tirer et valider, `Échap` quitter. En 3D, la souris vise et les touches
-sont remappables dans le menu OPTIONS.
+**Controls** — `W`/`S` or `↑`/`↓` forward/back, `A`/`D` strafe, `←`/`→` turn, left click / `Ctrl` /
+`Space` to fire and confirm, `Esc` to quit. In 3D the mouse aims, and the keys are remappable in the
+OPTIONS menu.
 
 ### Android
 
-Un seul APK contient les deux moteurs. **Pouce gauche** : avancer, reculer, tourner. **Pouce
-droit** : pas de côté (◀ ▶) et tir. **Bouton MENU** en haut à droite : recule d'un cran
-(partie → menu → launcher → quitter), comme la touche retour.
+A single APK holds both renderers. **Left thumb**: forward, back, turn. **Right thumb**: strafe
+(◀ ▶) and fire. **MENU button**, top right: steps back one level (game → menu → launcher → quit),
+same as the back key.
 
-Android 8.0 minimum. Les assets sont téléchargés au premier lancement (réseau nécessaire cette
-fois-là seulement).
+Android 8.0 minimum. Assets are downloaded on first run (network needed that once only).
 
 ---
 
-## Comment c'est vérifié
+## How it's verified
 
-Il n'y a pas de tests unitaires au sens habituel : la référence n'est pas une spécification, c'est
-un fichier assembleur. Chaque sous-système a donc son **harnais**, qui rejoue un scénario et
-compare le comportement à celui décrit par l'asm. Une trentaine au total, tous dans
-`src/gloom/tools/` :
+There are no unit tests in the usual sense: the reference isn't a specification, it's an assembly
+file. So each subsystem has its own **harness**, which replays a scenario and compares the behaviour
+to what the asm describes. About thirty in total, all under `src/gloom/tools/`:
 
 ```bash
-gradle checkLayout        # disposition mémoire : chaque offset contre le .s
+gradle checkLayout        # memory layout: every offset against the .s
 gradle mathTest           # RNG, angles, calcangle
-gradle mapTest            # chargement map + textures
-gradle goreTest           # sang, gibs, décals, flinch → gore.png
-gradle monsterTest        # IA par type de monstre
-gradle bossTest           # dragon et deathhead
-gradle powerupTest        # powerups, messages, objets animés, aspiration
-gradle medTest            # lecteur MED → med1.wav
-gradle levelRenderTest    # rend une frame d'un vrai niveau → level.png
-gradle rebirth -Dshot     # capture de la vue 3D → rebirth.png
+gradle mapTest            # map and texture loading
+gradle goreTest           # blood, gibs, decals, flinch → gore.png
+gradle monsterTest        # AI per monster type
+gradle bossTest           # dragon and deathhead
+gradle powerupTest        # powerups, messages, animated objects, soul suck
+gradle medTest            # MED player → med1.wav
+gradle levelRenderTest    # renders one frame of a real level → level.png
+gradle rebirth -Dshot     # screenshot of the 3D view → rebirth.png
 ```
 
-Chacun affiche `TOUT OK` ou écrit un PNG/WAV de démonstration. `gradle tasks --group verification`
-donne la liste complète.
+Each one prints `TOUT OK` or writes a demonstration PNG/WAV. `gradle tasks --group verification`
+lists them all.
 
 ---
 
-## Structure
+## Layout
 
-| dossier | contenu |
+| directory | contents |
 |---|---|
-| `src/gloom/` | le moteur : `Mem`, `M68k`, `Render`, `Objects`, `Player`, `Map`, `Events`, `Sfx`, `MedPlayer`… |
-| `src/gloom/host/` | couche hôte PC (LWJGL) : fenêtre, audio, boucle de jeu, HUD, menus, séquenceur |
-| `src/gloom/rebirth/` | la vue 3D jMonkeyEngine |
-| `src/gloom/data/` | sections `.data` de l'asm : tables précalculées, `objinfo` |
-| `src/gloom/tools/` | les harnais de vérification |
-| `android/` | module Android (compile `../src` tel quel) |
-| `scripts/` | outillage annexe (upscale IA des textures pour le mode HD) |
-| `dist/` | scripts de récupération des assets livrés avec le paquet |
+| `src/gloom/` | the engine: `Mem`, `M68k`, `Render`, `Objects`, `Player`, `Map`, `Events`, `Sfx`, `MedPlayer`… |
+| `src/gloom/host/` | the PC host layer (LWJGL): window, audio, game loop, HUD, menus, sequencer |
+| `src/gloom/rebirth/` | the jMonkeyEngine 3D view |
+| `src/gloom/data/` | the asm's `.data` sections: precomputed tables, `objinfo` |
+| `src/gloom/tools/` | the verification harnesses |
+| `android/` | the Android module (compiles `../src` as is) |
+| `scripts/` | side tooling (AI upscaling of the textures for HD mode) |
+| `dist/` | the asset-fetching scripts shipped with the package |
 
 ---
 
 ## Distribution
 
 ```bash
-gradle jpackage           # app native autonome → build/jpackage/Gloom/Gloom.exe (JRE embarqué)
-gradle jpackageInstaller  # installeur natif : .msi (WiX requis), .dmg, .deb
-cd android && gradle assembleRelease    # APK Android
+gradle jpackage           # self-contained native app → build/jpackage/Gloom/Gloom.exe (bundled JRE)
+gradle jpackageInstaller  # native installer: .msi (needs WiX), .dmg, .deb
+cd android && gradle assembleRelease    # Android APK
 ```
 
-Le paquet contient l'exécutable, le JRE, les jars, et **`fetch-assets.bat`/`.sh`** — mais **pas les
-assets** (voir ci-dessous). L'utilisateur lance le script une fois, puis le jeu.
+The package holds the executable, the JRE, the jars and **`fetch-assets.bat`/`.sh`** — but **not the
+assets** (see below). The user runs the script once, then the game.
 
-Les binaires prêts à l'emploi sont dans les
-[releases](https://github.com/guillaumemonet/gloom-java/releases).
+Ready-made binaries are on the
+[releases page](https://github.com/guillaumemonet/gloom-java/releases).
 
 ---
 
-## Licence et crédits
+## Licence and credits
 
-*Gloom* est © **Black Magic Software**. Les **sources `.s`/`.bb2` d'origine sont dans le domaine
-public** (cf. le dépôt `GloomAmiga`) et constituent la référence de ce portage.
+*Gloom* is © **Black Magic Software**. The **original `.s`/`.bb2` sources are public domain** (see
+the `GloomAmiga` repository) and are this port's reference.
 
-Les **assets** — graphismes, sons, maps — **ne le sont pas** et ne sont **jamais redistribués**
-ici : ni le dépôt, ni le paquet PC, ni l'APK ne les contiennent. Ils sont récupérés depuis
-[earok/GloomAmiga](https://github.com/earok/GloomAmiga), dépôt de préservation, au premier
-lancement.
+The **assets** — graphics, sounds, maps — **are not**, and are **never redistributed** here: neither
+the repository, nor the PC package, nor the APK contains them. They are fetched from
+[earok/GloomAmiga](https://github.com/earok/GloomAmiga), a preservation repository, on first run.
 
-Moteur d'origine : **Black Magic Software** (1995).
-Portage Java : **Guillaume Monet**.
+Original engine: **Black Magic Software** (1995).
+Java port: **Guillaume Monet**.
 
-Le portage a été mené avec l'assistance d'une IA (Claude, Anthropic) : écriture du code de
-traduction, harnais de vérification et instrumentation. Les choix d'architecture, la validation
-contre l'assembleur d'origine et le résultat restent ceux de l'auteur.
+The port was carried out with AI assistance (Claude, Anthropic): writing the translation code, the
+verification harnesses and the instrumentation. The architectural decisions, the validation against
+the original assembly and the result remain the author's own.
