@@ -457,3 +457,13 @@ tasks.register('checkDisks', JavaExec) {
     workingDir = assetRoot
     standardInput = System.in
 }
+
+// Gloom Deluxe : panneau HUD (smallfont2.bin) + arme à l'écran (gun.bin). PNG deluxe_hud.png.
+tasks.register('deluxeHudTest', JavaExec) {
+    group = 'verification'
+    description = 'Panneau HUD + arme Deluxe sur une vraie scene. Doit afficher TOUT OK.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.tools.DeluxeHudTest'
+    workingDir = assetRoot
+    systemProperties System.getProperties().subMap(['map', 'tile'])
+}

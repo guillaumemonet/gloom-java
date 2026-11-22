@@ -363,6 +363,16 @@ public final class Render {
         }
     }
 
+    /**
+     * Réduit la VUE aux {@code vh} premières lignes du framebuffer (hite/maxy/miny), sans toucher à
+     * son allocation ni à son pas : le reste (bas de l'écran) est libre pour le panneau Deluxe.
+     */
+    public static void setViewHeight(int vh) {
+        Mem.ww(Vars.hite, vh);
+        Mem.ww(Vars.maxy, vh / 2);
+        Mem.ww(Vars.miny, -(vh / 2));
+    }
+
     /** Efface le framebuffer (couleur de fond). Remplace le CLS par blitter de drawstrip. */
     public static void clearFramebuffer(int rgb) {
         int fb = Mem.l(Vars.cop);

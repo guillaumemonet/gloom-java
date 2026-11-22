@@ -24,6 +24,9 @@ package gloom;
 public final class Mess {
 
     private static String text = "";
+    /** Numéro du dernier message posé, et son texte (pour le défileur du panneau Deluxe). */
+    private static int seq;
+    private static String last = "";
 
     private Mess() {
     }
@@ -32,6 +35,8 @@ public final class Mess {
     public static void message(int a5, String s) {
         if (a5 == 0) return;
         text = s;
+        last = s;
+        seq++;
         Mem.ww(a5 + Defs.ob_messlen, s.length());
         Mem.ww(a5 + Defs.ob_messtimer, -127);
     }
@@ -51,6 +56,16 @@ public final class Mess {
         }
         Mem.ww(a5 + Defs.ob_messtimer, M68k.negw(t));         // neg ob_messtimer → devient positif
         return text;
+    }
+
+    /** Numéro du dernier message posé (change à chaque {@link #message}). */
+    public static int seq() {
+        return seq;
+    }
+
+    /** Texte du dernier message posé (même après la fin de son affichage classique). */
+    public static String lastText() {
+        return last;
     }
 
     /** Oublie le message courant (changement de niveau / nouvelle partie). */

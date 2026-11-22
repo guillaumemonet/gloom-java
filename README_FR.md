@@ -94,6 +94,10 @@ obtenu en instrumentant plutôt qu'en devinant :
 
 ## Ce qui marche
 
+- **Panneau HUD et arme à l'écran de Gloom Deluxe** : vue 320×224 et panneau 320×16 dessous
+  (vie, vies, puissance de l'arme, jauge mega, messages qui défilent), arme avec balancement de marche
+  et flamme de tir selon l'arme — lus dans `smallfont2.bin`/`gun.bin` de la disquette et dessinés
+  selon le code de `gloom2` Deluxe (`gradle deluxeHudTest`).
 - Les **niveaux s'enchaînent** : écran-titre, menu, écrans d'histoire, campagne complète pilotée
   par le script d'origine, points de contrôle et reprise (« CONTINUE FROM… »).
 - **Déplacement et collision** suivant les règles de l'asm (glissement le long des murs, écrasement),

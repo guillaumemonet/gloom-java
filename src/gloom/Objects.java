@@ -1468,6 +1468,7 @@ public final class Objects {
      * Bloc triche (cheat) et tir multiple « mega » non portés (cheat=0, powerup mega reporté).
      */
     public static void checkfire(int a5) {
+        if (gunFlash > 0) gunFlash--;                             // Deluxe @0039ac : subq #1,$a4
         if (!checkfireb(a5)) {                                    // beq .nofire
             int rc = Mem.ub(a5 + Defs.ob_reloadcnt);
             if (rc != 0) Mem.wb(a5 + Defs.ob_reloadcnt, rc - 1);
@@ -1475,6 +1476,7 @@ public final class Objects {
         }
         int rc = Mem.ub(a5 + Defs.ob_reloadcnt);
         if (rc != 0) { Mem.wb(a5 + Defs.ob_reloadcnt, rc - 1); return; } // .nofire2 (en rechargement)
+        gunFlash = 4;                                             // Deluxe : move #5,$a4 (@003d6a) puis subq en fin de passe (@0039ac)
 
         int d2 = (Mem.uw(a5 + Defs.ob_collwith) & 3) ^ 3;         // colltype = (collwith&3) eor 3
         int d3 = 0;                                               // collwith balle = 0
@@ -1499,6 +1501,14 @@ public final class Objects {
         Sfx.playsfx(shootSfx(w), 32, 0);                          // sfx de tir de l'arme
         Mem.wb(a5 + Defs.ob_reloadcnt, Mem.b(a5 + Defs.ob_reload));
     }
+
+    /**
+     * Minuterie du flash de l'arme à l'écran (ajout de Gloom Deluxe, champ $a4 du joueur — qui y
+     * remplace ob_hyper, le bonus d'invincibilité ayant été retiré de Deluxe). Le portage garde
+     * ob_hyper : la minuterie vit ici. Posée à 5 au tir, décomptée à chaque passe ; lue par
+     * l'affichage (host.Gun).
+     */
+    public static int gunFlash;
 
     private static final int OK = 750 + 125;                      // seuil overkill (gloom.s:17 `ok equ`)
 

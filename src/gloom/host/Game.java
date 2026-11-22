@@ -165,7 +165,7 @@ public final class Game {
     /** Rend la frame courante dans le framebuffer ($0RGB). */
     public void render() {
         switch (phase) {
-            case PLAYING -> { if (scene != null) { scene.renderFrame(); Hud.draw(Mem.l(Vars.cop), width, height, scene.player); } }
+            case PLAYING -> { if (scene != null) { scene.renderFrame(); if (!Panel.available()) Hud.draw(Mem.l(Vars.cop), width, height, scene.player); } }
             case STORY -> renderStory();
             case OVER -> renderOver();
         }

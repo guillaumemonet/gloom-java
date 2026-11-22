@@ -94,6 +94,10 @@ instrumenting rather than guessing:
 
 ## What works
 
+- **Gloom Deluxe status panel and on-screen gun**: 320×224 view with the 320×16 panel below
+  (health, lives, weapon power, mega gauge, scrolling messages), gun with walking bob and per-weapon
+  muzzle flash — read from the disk's `smallfont2.bin`/`gun.bin` and drawn after Deluxe's `gloom2`
+  code (`gradle deluxeHudTest`).
 - **Levels chain together**: title screen, menu, story screens, the full campaign driven by the
   original script, checkpoints and resume ("CONTINUE FROM…").
 - **Movement and collision** following the asm's rules (sliding along walls, crushing), all five

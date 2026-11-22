@@ -23,6 +23,8 @@ public final class LevelScene {
 
     public int player;          // objet joueur spawné (caméra)
     public int width, height;
+    /** Hauteur de la vue 3D : height, ou height − 16 quand le panneau Deluxe occupe le bas. */
+    public int viewHeight;
 
     /** Setup permanent fait une seule fois (map_rgbs persistant + objets permanents remappés). */
     private static boolean permInit = false;
@@ -34,6 +36,9 @@ public final class LevelScene {
     public void init(int w, int h, String mapName, String tile) {
         width = w; height = h;
         Render.setupFramebuffer(w, h);
+        viewHeight = Panel.available() ? h - Panel.HEIGHT : h;   // Deluxe : vue 320×224 + panneau 320×16
+        Render.setViewHeight(viewHeight);
+        Panel.reset();
         Render.configure(gloom2);            // focshft + table castrots selon la variante
         Mem.ww(Vars.mode, 1);                // mode gore « les restes restent » (décals au sol) par défaut
         gloom.Maths.seedrnd(12345);          // RNG (rnddelay, dispersion de tir…)
@@ -163,10 +168,13 @@ public final class LevelScene {
         Render.drawshapes();                              // sprites objets + strips see-through
         Render.drawblood();
         int fb = Mem.l(Vars.cop);
-        Splat.drawInto(fb, width, height);                // scrnblood → éclaboussure sur la vue
-        // bloc message de drawscene (gloom.s:2693) : centré, à un quart de la hauteur (printmess)
+        Gun.draw(fb, width, width, viewHeight, width / 2.0, player);   // arme à l'écran (Deluxe : F = largeur/2)
+        Splat.drawInto(fb, width, viewHeight);            // scrnblood → éclaboussure sur la vue
+        // bloc message de drawscene (gloom.s:2693) : centré, à un quart de la hauteur (printmess).
+        // Avec le panneau Deluxe, les messages défilent dans le panneau à la place (Panel).
         String mess = gloom.Mess.current(player);
-        if (!mess.isEmpty()) Font.drawCentered(fb, width, height, height / 4, mess, 0xfff);
+        if (Panel.available()) Panel.draw(fb, width, height, player);
+        else if (!mess.isEmpty()) Font.drawCentered(fb, width, viewHeight, viewHeight / 4, mess, 0xfff);
     }
 
     /**
@@ -191,6 +199,7 @@ public final class LevelScene {
             gloom.Dynamic.dodoors();                      // ouverture/fermeture des portes
             Objects.moveblood();                          // physique du sang
             Objects.obj_loop();
+            Panel.tick();                                 // défileur de messages du panneau (Deluxe)
             int p = Mem.l(ObjInfo.player1);
             if (p != 0) player = p;
         }
