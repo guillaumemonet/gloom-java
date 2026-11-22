@@ -54,8 +54,7 @@ public final class Display {
         glfwSwapInterval(1);                 // vsync
         GL.createCapabilities();
         // Quelle carte ? Sur portable double carte, java.exe tombe souvent sur l'iGPU (cf. GpuCheck).
-        String gpuWarn = GpuCheck.report(glGetString(GL_RENDERER), glGetString(GL_VENDOR));
-        if (gpuWarn != null) glfwSetWindowTitle(window, title + "  -  " + gpuWarn + " (voir console)");
+        GpuCheck.report(glGetString(GL_RENDERER), glGetString(GL_VENDOR));
 
         tex = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, tex);

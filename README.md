@@ -167,8 +167,7 @@ Gradle 9.x. The LWJGL natives are set to Windows x64; for Linux/macOS, change `l
 **Controls** — `W`/`S` or `↑`/`↓` forward/back, `A`/`D` strafe, `←`/`→` turn, left click / `Ctrl` /
 `Space` to fire and confirm, `Esc` to quit.
 
-At startup the graphics card in use is printed; if it is an integrated chip, a warning is shown
-(console + window title) with the Windows fix.
+At startup the graphics card in use (`GL_RENDERER`) is printed in the console.
 
 ### Android
 

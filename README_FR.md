@@ -169,8 +169,7 @@ Les natives LWJGL sont réglées sur Windows x64 ; pour Linux/macOS, changez `lw
 **Contrôles** — `W`/`S` ou `↑`/`↓` avancer/reculer, `A`/`D` pas de côté, `←`/`→` tourner, clic
 gauche / `Ctrl` / `Espace` tirer et valider, `Échap` quitter.
 
-Au démarrage, la carte graphique utilisée est affichée ; si c'est une puce intégrée, un
-avertissement apparaît (console + titre de la fenêtre) avec le correctif Windows.
+Au démarrage, la carte graphique utilisée (`GL_RENDERER`) est affichée dans la console.
 
 ### Android
 
