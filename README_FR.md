@@ -27,7 +27,7 @@ Le rasteriseur d'origine, porté, en 320 × 240 interne : la fidélité au pixel
 ![Gloom Classic](docs/img/classic-2d.png)
 
 > La vue 3D temps réel (jMonkeyEngine, éclairage dynamique, mouselook) est un projet séparé,
-> **`../../gloom-rebirth/`**, qui compile la simulation de ce projet-ci telle quelle.
+> **[gloom-rebirth](https://github.com/guillaumemonet/gloom-rebirth)**, qui compile la simulation de ce projet-ci telle quelle.
 
 Le HUD, les menus et les écrans d'histoire sont ceux du jeu, décodés depuis ses propres données
 (images IFF, fonte Amiga à 7 plans) :

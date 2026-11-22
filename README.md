@@ -27,7 +27,7 @@ The original rasteriser, ported, at 320 × 240 internally: pixel fidelity.
 ![Gloom Classic](docs/img/classic-2d.png)
 
 > The real-time 3D view (jMonkeyEngine, dynamic lighting, mouselook) is a separate project,
-> **`../../gloom-rebirth/`**, which compiles this project's simulation as is.
+> **[gloom-rebirth](https://github.com/guillaumemonet/gloom-rebirth)**, which compiles this project's simulation as is.
 
 The HUD, the menus and the story screens are the game's own, decoded from its own data (IFF
 images, 7-plane Amiga font):
