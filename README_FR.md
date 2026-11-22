@@ -22,19 +22,23 @@ Porté par **Guillaume Monet**.
 
 ## Le rendu
 
-Le rasteriseur d'origine, porté, en 320 × 240 interne : la fidélité au pixel.
+Le rasteriseur d'origine, porté, en 320 × 240 interne : la fidélité au pixel. Les données viennent
+directement des disquettes de **Gloom Deluxe**, avec son panneau de statut et son arme à l'écran
+(vue 320 × 224, panneau 320 × 16 dessous).
 
 ![Gloom Classic](docs/img/classic-2d.png)
 
 > La vue 3D temps réel (jMonkeyEngine, éclairage dynamique, mouselook) est un projet séparé,
 > **[gloom-rebirth](https://github.com/guillaumemonet/gloom-rebirth)**, qui compile la simulation de ce projet-ci telle quelle.
 
-Le HUD, les menus et les écrans d'histoire sont ceux du jeu, décodés depuis ses propres données
-(images IFF, fonte Amiga à 7 plans) :
+Le panneau, l'arme, les menus et les écrans d'histoire sont ceux du jeu, décodés depuis ses propres
+données (anims Gloom, images IFF, fonte Amiga à 7 plans) et dessinés selon le code de Deluxe :
+vie, vies, puissance de l'arme, jauge mega, messages qui défilent dans le panneau ; arme qui se
+balance à la marche, flamme de tir propre à chaque arme.
 
-| HUD en jeu | Écran d'histoire |
+| Tir (panneau + arme Deluxe) | Écran d'histoire |
 |---|---|
-| ![HUD](docs/img/classic-hud.png) | ![Écran d'histoire](docs/img/ecran-histoire.png) |
+| ![Tir](docs/img/classic-hud.png) | ![Écran d'histoire](docs/img/ecran-histoire.png) |
 
 Deux variantes du rasteriseur sont portées : `gloom.s` (chunky, `focshft 6`, FOV large) et
 `gloom2.s` (planaire/AGA, `focshft 7` + `castrots128`, projection « Deluxe » moins déformée).
@@ -223,6 +227,7 @@ donne la liste complète.
 ## Distribution
 
 ```bash
+gradle releaseZip         # zip de release Windows → build/release/Gloom-<version>-windows-x64.zip
 gradle jpackage           # app native autonome → build/jpackage/Gloom/Gloom.exe (JRE embarqué)
 gradle jpackageInstaller  # installeur natif : .msi (WiX requis), .dmg, .deb
 cd android && gradle assembleRelease    # APK Android

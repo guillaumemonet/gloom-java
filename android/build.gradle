@@ -16,8 +16,8 @@ android {
         applicationId 'gloom.android'
         minSdk 26                 // java.nio.file (Assets/Progress) exige API 26
         targetSdk 34
-        versionCode 3
-        versionName '0.6'
+        versionCode 4
+        versionName '0.7'
     }
 
     compileOptions {

@@ -405,7 +405,7 @@ def jpackageArgs = { String type ->
     [jpackageTool.absolutePath,
      '--type', type,
      '--name', 'Gloom',
-     '--app-version', '0.6',
+     '--app-version', '0.7',
      '--vendor', 'Guillaume Monet',
      '--copyright', 'Moteur (c) Black Magic Software 1995 - portage Java Guillaume Monet',
      '--description', 'Gloom - portage Java du moteur Amiga, par Guillaume Monet',
@@ -466,4 +466,14 @@ tasks.register('deluxeHudTest', JavaExec) {
     mainClass = 'gloom.tools.DeluxeHudTest'
     workingDir = assetRoot
     systemProperties System.getProperties().subMap(['map', 'tile'])
+}
+
+// Archive de release Windows : l'app native zippée → build/release/Gloom-<version>-windows-x64.zip
+tasks.register('releaseZip', Zip) {
+    group = 'distribution'
+    description = 'Zippe l\'app native (jpackage) pour une release GitHub'
+    dependsOn tasks.named('jpackage')
+    from(jpackageOutDir.map { it.dir('Gloom') }) { into 'Gloom' }
+    archiveFileName = 'Gloom-0.7-windows-x64.zip'
+    destinationDirectory = layout.buildDirectory.dir('release')
 }

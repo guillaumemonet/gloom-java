@@ -22,19 +22,23 @@ Ported by **Guillaume Monet**.
 
 ## The renderer
 
-The original rasteriser, ported, at 320 × 240 internally: pixel fidelity.
+The original rasteriser, ported, at 320 × 240 internally: pixel fidelity. The data comes straight
+from the **Gloom Deluxe** floppy images, with its status panel and on-screen gun (320 × 224 view,
+320 × 16 panel below).
 
 ![Gloom Classic](docs/img/classic-2d.png)
 
 > The real-time 3D view (jMonkeyEngine, dynamic lighting, mouselook) is a separate project,
 > **[gloom-rebirth](https://github.com/guillaumemonet/gloom-rebirth)**, which compiles this project's simulation as is.
 
-The HUD, the menus and the story screens are the game's own, decoded from its own data (IFF
-images, 7-plane Amiga font):
+The panel, the gun, the menus and the story screens are the game's own, decoded from its own data
+(Gloom anims, IFF images, 7-plane Amiga font) and drawn after Deluxe's code: health, lives, weapon
+power, mega gauge, messages scrolling in the panel; a gun that bobs as you walk and a muzzle flash
+per weapon.
 
-| In-game HUD | Story screen |
+| Firing (Deluxe panel + gun) | Story screen |
 |---|---|
-| ![HUD](docs/img/classic-hud.png) | ![Story screen](docs/img/ecran-histoire.png) |
+| ![Firing](docs/img/classic-hud.png) | ![Story screen](docs/img/ecran-histoire.png) |
 
 Two variants of the rasteriser are ported: `gloom.s` (chunky, `focshft 6`, wide FOV) and `gloom2.s`
 (planar/AGA, `focshft 7` + `castrots128`, the less distorted "Deluxe" projection). They share the
@@ -219,6 +223,7 @@ lists them all.
 ## Distribution
 
 ```bash
+gradle releaseZip         # Windows release zip → build/release/Gloom-<version>-windows-x64.zip
 gradle jpackage           # self-contained native app → build/jpackage/Gloom/Gloom.exe (bundled JRE)
 gradle jpackageInstaller  # native installer: .msi (needs WiX), .dmg, .deb
 cd android && gradle assembleRelease    # Android APK
