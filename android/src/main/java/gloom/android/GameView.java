@@ -14,6 +14,7 @@ import android.view.SurfaceView;
 import java.io.File;
 
 import gloom.Assets;
+import gloom.boot.Boot;
 import gloom.Mem;
 import gloom.Render;
 import gloom.Sfx;
@@ -54,13 +55,15 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
     private volatile boolean surfaceReady;
     private volatile String status;            // message plein écran (chargement / erreur)
 
-    private final File assetRoot;
+    private final File adfDir;                 // disquettes Gloom Deluxe (stockage privé)
+    private final AndroidAsk ask;              // questions/infos à l'utilisateur (boîtes de dialogue)
     private AndroidAudio audio;
     private Runnable onExit;                   // ferme l'activité quand la boucle se termine
 
     public GameView(Context ctx) {
         super(ctx);
-        assetRoot = new File(ctx.getFilesDir(), "GloomAmiga");
+        adfDir = new File(ctx.getFilesDir(), "adf");
+        ask = new AndroidAsk((android.app.Activity) ctx);
         getHolder().addCallback(this);
         setFocusable(true);
         blit.setFilterBitmap(false);           // pixels francs, pas de lissage
@@ -126,22 +129,20 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
 
     @Override
     public void run() {
-        try {
-            if (!AssetSetup.ready(assetRoot)) {
-                status = "Premier lancement\nRecuperation des assets\n" + AssetSetup.sourceLabel();
-                paintStatus();
-                // le callback repeint : le fil de jeu est bloque dans le telechargement
-                AssetSetup.install(assetRoot, m -> { status = m; paintStatus(); });
-            }
-        } catch (Exception e) {
-            status = "Assets indisponibles\n" + e.getMessage() + "\n\nVerifie ta connexion et relance.";
+        // Données du jeu : les disquettes Gloom Deluxe, dans le stockage privé. Absentes au premier
+        // lancement → on propose de les télécharger (boîte de dialogue, rien sans un oui).
+        System.setProperty("gloom.adf", adfDir.getAbsolutePath());
+        status = "Disquettes Gloom Deluxe...";
+        paintStatus();
+        if (!Boot.ensure(ask)) {
+            status = "Disquettes absentes\n\nCopie les deux .adf de Gloom Deluxe dans\n"
+                    + adfDir.getAbsolutePath() + "\nou relance pour les telecharger.";
             while (running) { paintStatus(); sleep(100); }
             return;
         }
 
         // À partir d'ici seulement on touche au moteur : Font, Menu, Hud… chargent des assets
         // dans leurs initialiseurs statiques.
-        Assets.root = assetRoot.toPath();
         status = null;
 
         frame = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
@@ -244,7 +245,7 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
 
     private static byte[] loadModule(String name) {
         try {
-            return java.nio.file.Files.readAllBytes(Assets.resolve(name));
+            return Assets.read(name);
         } catch (Exception e) {
             return null;
         }

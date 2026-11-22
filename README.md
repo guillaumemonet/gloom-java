@@ -109,7 +109,7 @@ instrumenting rather than guessing:
 - **Dynamic geometry**: doors, rotating polygons, texture animations, trigger zones (ambushes,
   teleports, exit).
 - **Audio**: every effect, the monsters' ambient voices, and the MED music.
-- **Android**: an APK of the 2D engine, touch controls, assets fetched on first run.
+- **Android**: an APK of the 2D engine, touch controls, disks fetched on first run.
 
 ## What's missing
 
@@ -126,13 +126,22 @@ instrumenting rather than guessing:
 
 ### From source
 
-You need the asset repository **next to** this one (the assets aren't redistributable, see below):
+The game data is read **straight from the two Gloom Deluxe floppy images** (`.adf`), mounted in
+memory — nothing is extracted to disk. Crunch-Mania packed files are unpacked on read. The only
+files shipped are `gloom.s`'s compile-time `incbin`s (tables and built-in sprites,
+`src/gloom/data/incbin/`), which are part of the sources.
 
 ```
 Gloom/
-├── GloomAmiga/     ← git clone https://github.com/earok/GloomAmiga
+├── adf/            ← Gloom Deluxe (Disk 1 of 2).adf + (Disk 2 of 2).adf
 └── gloom-java/     ← this Gradle project
 ```
+
+The disks are looked for in `-Dgloom.adf=<dir>`, `./adf`, `../adf`, then `~/.gloom-java/adf`. If
+they are missing, the game **offers** to download them from
+[Amiga Museum](https://amigamuseum.emu-france.info) (two archives, ~1.4 MB) — nothing without a yes.
+They are recognised by volume name (`gloomprog`, `gloomdata`): both the "[a]" and the "[cr DLM]"
+releases work. `gradle checkDisks` mounts them without starting the game.
 
 Then, from `gloom-java/`:
 
@@ -143,7 +152,9 @@ gradle run -Dscale=4              # bigger window (320×240 internally)
 gradle run -Dmap=map1_3 -Dtile=1  # a single level (testing / sightseeing)
 ```
 
-Options: `-Dw= -Dh= -Dscale= -Dmap= -Dtile= -Dengine=gloom2 -Dmedspeed= -Dgloom.assets=`.
+Options: `-Dw= -Dh= -Dscale= -Dmap= -Dtile= -Dengine=gloom2 -Dmedspeed= -Dgloom.adf=`.
+Developer mode: `-Dgloom.assets=../GloomAmiga` reads a directory (the GloomAmiga repository) instead
+of the disks.
 
 **Requirements**: JDK 21 (the Gradle toolchain is pinned to it, and `jpackage` comes from it),
 Gradle 9.x. The LWJGL natives are set to Windows x64; for Linux/macOS, change `lwjglNatives` in
@@ -161,7 +172,7 @@ The APK holds the 2D engine (the 3D view has its own APK in `gloom-rebirth`). **
 (◀ ▶) and fire. **MENU button**, top right: steps back one level (game → menu → quit),
 same as the back key.
 
-Android 8.0 minimum. Assets are downloaded on first run (network needed that once only).
+Android 8.0 minimum. On first run the app offers to download the disks (network needed that once only).
 
 ---
 
@@ -197,7 +208,8 @@ lists them all.
 | `src/gloom/data/` | the asm's `.data` sections: precomputed tables, `objinfo` |
 | `src/gloom/tools/` | the verification harnesses |
 | `android/` | the Android module (compiles `../src` as is) |
-| `dist/` | the asset-fetching scripts shipped with the package |
+| `src/gloom/boot/` | reading the `.adf` floppy images (mounting, offered download) |
+| `src/gloom/data/incbin/` | `gloom.s`'s compile-time `incbin`s (tables, built-in sprites) |
 
 ---
 
@@ -209,8 +221,8 @@ gradle jpackageInstaller  # native installer: .msi (needs WiX), .dmg, .deb
 cd android && gradle assembleRelease    # Android APK
 ```
 
-The package holds the executable, the JRE, the jars and **`fetch-assets.bat`/`.sh`** — but **not the
-assets** (see below). The user runs the script once, then the game.
+The package holds the executable, the JRE and the jars — **not the game data** (see below). On
+first run the game finds the disks (`<app>/adf`, `~/.gloom-java/adf`) or offers to download them.
 
 Ready-made binaries are on the
 [releases page](https://github.com/guillaumemonet/gloom-java/releases).
@@ -222,9 +234,11 @@ Ready-made binaries are on the
 *Gloom* is © **Black Magic Software**. The **original `.s`/`.bb2` sources are public domain** (see
 the `GloomAmiga` repository) and are this port's reference.
 
-The **assets** — graphics, sounds, maps — **are not**, and are **never redistributed** here: neither
-the repository, nor the PC package, nor the APK contains them. They are fetched from
-[earok/GloomAmiga](https://github.com/earok/GloomAmiga), a preservation repository, on first run.
+The **game data** — graphics, sounds, maps — **is not**, and is **never redistributed** here: neither
+the repository, nor the PC package, nor the APK contains it. It is read from the **Gloom Deluxe**
+floppy images, which the game offers to fetch from
+[Amiga Museum](https://amigamuseum.emu-france.info) on first run. Only `gloom.s`'s compile-time
+`incbin`s (tables, built-in sprites), which are part of the sources, are versioned.
 
 Original engine: **Black Magic Software** (1995).
 Java port: **Guillaume Monet**.

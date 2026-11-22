@@ -109,7 +109,7 @@ obtenu en instrumentant plutôt qu'en devinant :
 - **Géométrie dynamique** : portes, polygones en rotation, animations de textures, zones-trigger
   (embuscades, téléports, sortie).
 - **Audio** : tous les effets, les voix d'ambiance des monstres, et la musique MED.
-- **Android** : APK du moteur 2D, commandes tactiles, assets récupérés au premier
+- **Android** : APK du moteur 2D, commandes tactiles, disquettes récupérées au premier
   lancement.
 
 ## Ce qui manque
@@ -128,14 +128,22 @@ obtenu en instrumentant plutôt qu'en devinant :
 
 ### Depuis les sources
 
-Il faut le dépôt d'assets **à côté** de celui-ci (les assets ne sont pas redistribuables, voir
-plus bas) :
+Les données du jeu sont lues **directement dans les deux disquettes de Gloom Deluxe** (`.adf`),
+montées en mémoire — rien n'est extrait sur le disque. Les fichiers compactés Crunch-Mania sont
+décompactés à la lecture. Les seuls fichiers embarqués sont les `incbin` de compilation de
+`gloom.s` (tables et sprites intégrés, `src/gloom/data/incbin/`), qui font partie des sources.
 
 ```
 Gloom/
-├── GloomAmiga/     ← git clone https://github.com/earok/GloomAmiga
+├── adf/            ← Gloom Deluxe (Disk 1 of 2).adf + (Disk 2 of 2).adf
 └── gloom-java/     ← ce projet Gradle
 ```
+
+Les disquettes sont cherchées dans `-Dgloom.adf=<dossier>`, `./adf`, `../adf`, puis
+`~/.gloom-java/adf`. Si elles sont absentes, le jeu **propose** de les télécharger depuis
+[Amiga Museum](https://amigamuseum.emu-france.info) (deux archives, ~1,4 Mo) — rien sans un oui.
+Elles sont reconnues par leur nom de volume (`gloomprog`, `gloomdata`) : la version « [a] » comme
+la version « [cr DLM] » conviennent. `gradle checkDisks` les monte sans lancer le jeu.
 
 Puis, depuis `gloom-java/` :
 
@@ -146,7 +154,9 @@ gradle run -Dscale=4              # fenêtre plus grande (interne 320×240)
 gradle run -Dmap=map1_3 -Dtile=1  # un seul niveau (test/visite)
 ```
 
-Options : `-Dw= -Dh= -Dscale= -Dmap= -Dtile= -Dengine=gloom2 -Dmedspeed= -Dgloom.assets=`.
+Options : `-Dw= -Dh= -Dscale= -Dmap= -Dtile= -Dengine=gloom2 -Dmedspeed= -Dgloom.adf=`.
+Mode développeur : `-Dgloom.assets=../GloomAmiga` lit un dossier (le dépôt GloomAmiga) au lieu des
+disquettes.
 
 **Prérequis** : JDK 21 (la toolchain Gradle est figée dessus, et `jpackage` en vient), Gradle 9.x.
 Les natives LWJGL sont réglées sur Windows x64 ; pour Linux/macOS, changez `lwjglNatives` dans
@@ -164,7 +174,7 @@ L'APK contient le moteur 2D (la 3D a son propre APK dans `gloom-rebirth`). **Pou
 droit** : pas de côté (◀ ▶) et tir. **Bouton MENU** en haut à droite : recule d'un cran
 (partie → menu → quitter), comme la touche retour.
 
-Android 8.0 minimum. Les assets sont téléchargés au premier lancement (réseau nécessaire cette
+Android 8.0 minimum. Au premier lancement, l'application propose de télécharger les disquettes (réseau nécessaire cette
 fois-là seulement).
 
 ---
@@ -202,7 +212,8 @@ donne la liste complète.
 | `src/gloom/data/` | sections `.data` de l'asm : tables précalculées, `objinfo` |
 | `src/gloom/tools/` | les harnais de vérification |
 | `android/` | module Android (compile `../src` tel quel) |
-| `dist/` | scripts de récupération des assets livrés avec le paquet |
+| `src/gloom/boot/` | lecture des disquettes `.adf` (montage, téléchargement proposé) |
+| `src/gloom/data/incbin/` | les `incbin` de compilation de `gloom.s` (tables, sprites intégrés) |
 
 ---
 
@@ -214,8 +225,9 @@ gradle jpackageInstaller  # installeur natif : .msi (WiX requis), .dmg, .deb
 cd android && gradle assembleRelease    # APK Android
 ```
 
-Le paquet contient l'exécutable, le JRE, les jars, et **`fetch-assets.bat`/`.sh`** — mais **pas les
-assets** (voir ci-dessous). L'utilisateur lance le script une fois, puis le jeu.
+Le paquet contient l'exécutable, le JRE et les jars — **pas les données** (voir ci-dessous). Au
+premier lancement, le jeu trouve les disquettes (`<appli>/adf`, `~/.gloom-java/adf`) ou propose de
+les télécharger.
 
 Les binaires prêts à l'emploi sont dans les
 [releases](https://github.com/guillaumemonet/gloom-java/releases).
@@ -227,10 +239,11 @@ Les binaires prêts à l'emploi sont dans les
 *Gloom* est © **Black Magic Software**. Les **sources `.s`/`.bb2` d'origine sont dans le domaine
 public** (cf. le dépôt `GloomAmiga`) et constituent la référence de ce portage.
 
-Les **assets** — graphismes, sons, maps — **ne le sont pas** et ne sont **jamais redistribués**
-ici : ni le dépôt, ni le paquet PC, ni l'APK ne les contiennent. Ils sont récupérés depuis
-[earok/GloomAmiga](https://github.com/earok/GloomAmiga), dépôt de préservation, au premier
-lancement.
+Les **données du jeu** — graphismes, sons, maps — **ne le sont pas** et ne sont **jamais
+redistribuées** ici : ni le dépôt, ni le paquet PC, ni l'APK ne les contiennent. Elles sont lues
+dans les disquettes de **Gloom Deluxe**, que le jeu propose de récupérer sur
+[Amiga Museum](https://amigamuseum.emu-france.info) au premier lancement. Seuls les `incbin` de
+compilation de `gloom.s` (tables, sprites intégrés), qui font partie des sources, sont versionnés.
 
 Moteur d'origine : **Black Magic Software** (1995).
 Portage Java : **Guillaume Monet**.

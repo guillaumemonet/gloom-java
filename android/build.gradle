@@ -36,7 +36,10 @@ android {
                     'gloom/host/Display.java',         // fenêtre GLFW   → SurfaceView
                     'gloom/host/Audio.java',           // OpenAL         → AndroidAudio
                     'gloom/host/DisplayTest.java',
+                    'gloom/host/DesktopAsk.java',      // Swing
             ]
+            resources.srcDirs = ['../src']                   // incbin de compilation (tables, sprites)
+            resources.includes = ['gloom/data/incbin/*']
             manifest.srcFile 'src/main/AndroidManifest.xml'
             res.srcDirs = ['src/main/res']
         }

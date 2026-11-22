@@ -47,17 +47,25 @@ public final class MapTest {
     }
 
     private static void testLoadfile() {
-        byte[] ref;
+        byte[] ref, raw;
         try {
-            ref = gloom.Assets.read(MAP);
+            ref = gloom.Assets.read(MAP);                  // décompacté
+            raw = gloom.Assets.readRaw(MAP);               // tel que sur la disquette
         } catch (IOException e) {
             System.out.println("ECHEC loadfile: " + MAP + " introuvable"); failures++; return;
         }
         int addr = Files.loadfile(nameAddr(MAP), 1);
         checkTrue("loadfile-nonzero", addr != 0);
-        // en-tête d'allocation (allocmem2_ offset 16)
-        check("loadfile-alloc-offset", Mem.l(addr - 8), 16);
-        check("loadfile-alloc-size", Mem.l(addr - 12), ref.length + 16);
+        // en-tête d'allocation (allocmem2_ : bloc = [en-tête 16][d6][données]) — d6 = 0 si le fichier
+        // n'est pas compacté, 14+MinSecDist sinon (loadfile .crunch, décompactage sur place) ; la
+        // taille allouée est alors max(taille du fichier, taille décompactée).
+        boolean crunched = gloom.Decrunch.isCrunched(raw);
+        int d6 = crunched ? 14 + (((raw[4] & 0xff) << 8) | (raw[5] & 0xff)) : 0;
+        int d4 = crunched ? Math.max(raw.length, ref.length) : ref.length;
+        int blk = addr - 16 - d6;
+        System.out.println("[info] " + MAP + (crunched ? " compacte (" + raw.length + " -> " + ref.length + " o)" : " non compacte"));
+        check("loadfile-alloc-offset", Mem.l(blk + 8), 16 + d6);
+        check("loadfile-alloc-size", Mem.l(blk + 4), d4 + 16 + d6);
         // contenu identique sur quelques octets
         boolean same = true;
         for (int i = 0; i < Math.min(64, ref.length); i++) {

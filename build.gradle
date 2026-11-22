@@ -34,10 +34,12 @@ sourceSets {
         java {
             srcDirs = ['src']
         }
-        // Les assets du jeu sont lus directement depuis le dépôt source GloomAmiga via
-        // la couche FileIo : pas de resources Gradle à empaqueter.
+        // Les données du jeu viennent des disquettes (.adf, cf. gloom.boot). Seuls les incbin de
+        // compilation de gloom.s (tables, sprites intégrés) sont embarqués, comme ressources.
         resources {
-            srcDirs = []
+            srcDirs = ['src']
+            include 'gloom/data/incbin/*'
+            exclude '**/README.md'
         }
     }
 }
@@ -58,8 +60,8 @@ application {
     applicationName = 'Gloom'
 }
 
-// Les assets du jeu (dépôt GloomAmiga) sont résolus relativement à la racine du
-// projet (../GloomAmiga). On exécute donc depuis cette racine.
+// Racine d'exécution = ce projet : les disquettes sont cherchées dans ../adf (Gloom/adf), puis
+// ~/.gloom-java/adf (cf. gloom.boot.Disks) ; -Dgloom.assets=../GloomAmiga pour le mode dossier.
 def assetRoot = projectDir
 
 tasks.named('run') {
@@ -376,11 +378,10 @@ tasks.register('displayTest', JavaExec) {
 //                              JRE embarqué, AUCUN outil externe requis).
 // `gradle jpackageInstaller` → installeur natif (msi sous Windows [nécessite WiX], dmg/deb).
 //
-// IMPORTANT : les assets de Gloom ne sont PAS redistribuables (seuls les sources .s/.bb2 sont
-// domaine public). Le paquet n'embarque donc PAS les assets : il inclut un script
-// `fetch-assets.bat`/`.sh` que l'utilisateur final lance UNE fois pour les cloner depuis le
-// dépôt original (github.com/earok/GloomAmiga) dans $APPDIR/GloomAmiga. L'exécutable est lancé
-// avec -Dgloom.assets=$APPDIR/GloomAmiga (jeton résolu au runtime par le lanceur jpackage).
+// IMPORTANT : les données de Gloom ne sont PAS redistribuables. Le paquet n'embarque que le
+// moteur et les incbin de compilation de gloom.s ; au premier lancement, le jeu cherche les deux
+// disquettes Gloom Deluxe ($APPDIR/adf, ~/.gloom-java/adf…) et, si elles manquent, PROPOSE de les
+// télécharger (Amiga Museum) dans ~/.gloom-java/adf — rien sans un oui (cf. gloom.boot.DiskFetch).
 // ===========================================================================
 def jpackageInputDir = layout.buildDirectory.dir('jpackage-input')
 def jpackageOutDir = layout.buildDirectory.dir('jpackage')
@@ -389,7 +390,7 @@ def isMac = System.getProperty('os.name').toLowerCase().contains('mac')
 def jpackageTool = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
         .get().metadata.installationPath.file('bin/jpackage' + (isWindows ? '.exe' : '')).asFile
 
-// Rassemble le jar applicatif + les dépendances (LWJGL + natives). Pas d'assets (cf. ci-dessus).
+// Rassemble le jar applicatif + les dépendances (LWJGL + natives). Pas de données (cf. ci-dessus).
 tasks.register('jpackageStage', Copy) {
     group = 'distribution'
     description = "Prépare l'entrée jpackage (jar + natives LWJGL)"
@@ -412,13 +413,13 @@ def jpackageArgs = { String type ->
      '--main-jar', tasks.named('jar').get().archiveFileName.get(),
      '--main-class', 'gloom.host.Main',
      '--dest', jpackageOutDir.get().asFile.absolutePath,
-     '--java-options', '-Dgloom.assets=$APPDIR/GloomAmiga',
+     '--java-options', '-Dgloom.appdir=$APPDIR',
      '--java-options', '-Xmx512m']
 }
 
 tasks.register('jpackage', Exec) {
     group = 'distribution'
-    description = 'Crée une app native autonome (build/jpackage/Gloom) : JRE embarqué + script fetch-assets'
+    description = 'Crée une app native autonome (build/jpackage/Gloom) : JRE embarqué'
     dependsOn tasks.named('jpackageStage')
     doFirst {
         delete jpackageOutDir.get().dir('Gloom').asFile       // jpackage refuse une cible existante
@@ -427,14 +428,9 @@ tasks.register('jpackage', Exec) {
     }
     commandLine jpackageArgs('app-image')
     doLast {
-        // Scripts de récupération des assets à la racine du paquet (à côté de Gloom.exe).
-        copy {
-            from('dist') { include 'fetch-assets.bat', 'fetch-assets.sh' }
-            into jpackageOutDir.get().dir('Gloom')
-        }
         def root = jpackageOutDir.get().dir('Gloom').asFile
         println "App native créée : ${root}" + (isWindows ? '\\Gloom.exe' : '/bin/Gloom')
-        println "→ Lancez d'abord ${isWindows ? 'fetch-assets.bat' : 'fetch-assets.sh'} pour télécharger les assets."
+        println "→ Au premier lancement, le jeu cherche les disquettes Gloom Deluxe (ou propose de les télécharger)."
     }
 }
 
@@ -444,4 +440,20 @@ tasks.register('jpackageInstaller', Exec) {
     dependsOn tasks.named('jpackageStage')
     doFirst { jpackageOutDir.get().asFile.mkdirs() }
     commandLine jpackageArgs(isWindows ? 'msi' : (isMac ? 'dmg' : 'deb'))
+}
+
+// Source des données : disquettes Gloom Deluxe (-Dgloom.adf=dossier, sinon ./adf, ../adf,
+// ~/.gloom-java/adf) ou, en mode développeur, un dossier (-Dgloom.assets=../GloomAmiga).
+tasks.withType(JavaExec).configureEach {
+    systemProperties System.getProperties().subMap(['gloom.adf', 'gloom.assets', 'gloom.noDownload'])
+}
+
+// Monte les disquettes (propose le téléchargement si absentes) et dit ce qu'on y trouve.
+tasks.register('checkDisks', JavaExec) {
+    group = 'verification'
+    description = 'Trouve/monte les disquettes Gloom Deluxe (.adf). Doit les lister.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'gloom.boot.Boot'
+    workingDir = assetRoot
+    standardInput = System.in
 }

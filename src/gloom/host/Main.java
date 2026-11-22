@@ -18,6 +18,8 @@ import static org.lwjgl.glfw.GLFW.*;
 public final class Main {
 
     public static void main(String[] args) {
+        // Données du jeu : les disquettes Gloom Deluxe (trouvées, ou téléchargées avec accord).
+        if (!gloom.boot.Boot.ensure(DesktopAsk.INSTANCE)) return;
         // Résolution interne configurable. La largeur est plafonnée à 320 (limite de la table
         // castrots ; au-delà il faudrait régénérer les rayons). Défaut 320×240 (≈ pleine résolution
         // « 1x1 » Gloom Deluxe RTG) au lieu de l'ancien 224×160. `-Dw=` `-Dh=` `-Dscale=`.

@@ -173,9 +173,8 @@ public final class ListTest {
     }
 
     private static long assetSize(String name) {
-        var p = gloom.Assets.resolve(name);
         try {
-            return (p == null) ? -1 : Files.size(p);
+            return gloom.Assets.read(name).length;        // classpath (incbin), disquettes ou dossier
         } catch (Exception e) {
             return -1;
         }

@@ -75,6 +75,17 @@ public final class Mem {
         return allocTop;
     }
 
+    /**
+     * Rend la mémoire allouée depuis {@code mark} (= {@link #allocTop()} relevé avant) et la remet à
+     * zéro. Réservé aux tampons TEMPORAIRES de l'hôte (ex. décompactage d'un asset lu hors
+     * {@code loadfile}) : la disposition mémoire du jeu n'en garde aucune trace.
+     */
+    public static void release(int mark) {
+        if (mark < 4096 || mark > allocTop) throw new IllegalArgumentException("release " + mark);
+        java.util.Arrays.fill(RAM, mark, allocTop, (byte) 0);
+        allocTop = mark;
+    }
+
     // ------------------------------------------------------------------
     // Lectures
     // ------------------------------------------------------------------

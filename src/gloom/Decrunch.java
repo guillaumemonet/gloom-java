@@ -39,12 +39,62 @@ public final class Decrunch {
         int destLen = Mem.l(srcHeader + 6);
         int srcLen = Mem.l(srcHeader + 10);
         int dest = Mem.alloc(destLen);
+        decrunchTo(srcHeader, dest);
+        return dest;
+    }
+
+    /**
+     * Décrunche `srcHeader` (avec en-tête) vers `dest`, déjà réservé — c'est l'appel de
+     * {@code jsr decrm+32} dans loadfile, qui décompacte SUR PLACE (dest = src + 14 + MinSecDist,
+     * les deux zones se recouvrent : la lecture et l'écriture partent de la fin).
+     */
+    public static void decrunchTo(int srcHeader, int dest) {
+        int magic = Mem.l(srcHeader);
+        int destLen = Mem.l(srcHeader + 6);
+        int srcLen = Mem.l(srcHeader + 10);
         Decrunch d = new Decrunch();
         d.a1 = dest;
         d.a2 = srcHeader + 14;                                     // données compressées
         if (magic == CrM2) d.lzh(destLen, srcLen);
         else d.fast(destLen, srcLen);
-        return dest;
+    }
+
+    /** Bloc de tables de travail (« Tabbs » de decrm.s, statique dans l'original) : alloué une fois. */
+    private static int tabbs;
+
+    private static int tabbs() {
+        if (tabbs == 0) tabbs = Mem.alloc(TABSZ);
+        return tabbs;
+    }
+
+    /** True si les octets commencent par un magique Crunch-Mania (et ont un en-tête complet). */
+    public static boolean isCrunched(byte[] data) {
+        if (data == null || data.length < 14) return false;
+        int magic = ((data[0] & 0xff) << 24) | ((data[1] & 0xff) << 16) | ((data[2] & 0xff) << 8) | (data[3] & 0xff);
+        return magic == CrM2 || magic == CrMbang;
+    }
+
+    /**
+     * Décompacte un fichier lu hors {@code loadfile} (polices, images, script…) et rend les octets
+     * décompactés ; rend {@code data} tel quel s'il n'est pas compacté. Le travail se fait dans un
+     * tampon Mem TEMPORAIRE, libéré ensuite ({@link Mem#release}) : la disposition mémoire du jeu
+     * est inchangée.
+     */
+    public static byte[] unpack(byte[] data) {
+        if (!isCrunched(data)) return data;
+        tabbs();                                                   // hors de la zone temporaire
+        int mark = Mem.allocTop();
+        try {
+            int raw = Mem.alloc(data.length);
+            Mem.load(raw, data);
+            int destLen = Mem.l(raw + 6);
+            int dest = decrunch(raw);
+            byte[] out = new byte[destLen];
+            System.arraycopy(Mem.RAM, dest, out, 0, destLen);
+            return out;
+        } finally {
+            Mem.release(mark);
+        }
     }
 
     /** True si le fichier commence par un magique Crunch-Mania. */
@@ -85,7 +135,7 @@ public final class Decrunch {
     // ==================================================================
 
     private void lzh(int destLen, int srcLen) {
-        tab = Mem.alloc(TABSZ);                                    // bloc de tables (Tabbs)
+        tab = tabbs();                                             // bloc de tables (Tabbs)
         int a6 = tab + 2;                                         // a6 = Tabbs+2
         this.tab = a6;
         a1 += destLen;                                            // fin du tampon dest
