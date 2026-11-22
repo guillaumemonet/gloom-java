@@ -134,11 +134,10 @@ plus bas) :
 ```
 Gloom/
 ├── GloomAmiga/     ← git clone https://github.com/earok/GloomAmiga
-└── gloom-java/
-    └── java/       ← ce projet Gradle
+└── gloom-java/     ← ce projet Gradle
 ```
 
-Puis, depuis `java/` :
+Puis, depuis `gloom-java/` :
 
 ```bash
 gradle run                        # partie complète (logo → menu titre → campagne)

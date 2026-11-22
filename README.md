@@ -131,11 +131,10 @@ You need the asset repository **next to** this one (the assets aren't redistribu
 ```
 Gloom/
 ├── GloomAmiga/     ← git clone https://github.com/earok/GloomAmiga
-└── gloom-java/
-    └── java/       ← this Gradle project
+└── gloom-java/     ← this Gradle project
 ```
 
-Then, from `java/`:
+Then, from `gloom-java/`:
 
 ```bash
 gradle run                        # full game (logo → title menu → campaign)

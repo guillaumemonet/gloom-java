@@ -59,8 +59,8 @@ application {
 }
 
 // Les assets du jeu (dépôt GloomAmiga) sont résolus relativement à la racine du
-// projet (parent de java/). On exécute donc depuis cette racine.
-def assetRoot = projectDir.parentFile
+// projet (../GloomAmiga). On exécute donc depuis cette racine.
+def assetRoot = projectDir
 
 tasks.named('run') {
     workingDir = assetRoot
