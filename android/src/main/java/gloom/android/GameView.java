@@ -184,12 +184,15 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
         Game game = new Game();
         game.boot(W, H, checkpoint);
         pad.consumeMenuTap();
+        gloom.host.Clock clock = new gloom.host.Clock(); // simulation à 50 pas/s, quel que soit l'écran
         while (running) {
             if (pad.consumeMenuTap()) return;            // abandon → menu titre
-            if (game.scene != null) {
-                game.scene.setInput(pad.joyx(), pad.joyy(), pad.joyb(), pad.joys());
+            for (int n = clock.steps(); n > 0 && !game.over; n--) {
+                if (game.scene != null) {
+                    game.scene.setInput(pad.joyx(), pad.joyy(), pad.joyb(), pad.joys());
+                }
+                game.update(pad.fire());
             }
-            game.update(pad.fire());
             game.render();
             present();
             if (game.over) { waitFire(game); return; }   // écran de fin puis retour menu

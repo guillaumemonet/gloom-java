@@ -39,9 +39,12 @@ public final class Main {
             if (map != null) {
                 LevelScene scene = new LevelScene();    // mode « un seul niveau » (test/visite)
                 scene.init(W, H, map, System.getProperty("tile", "2"));
+                Clock clock = new Clock();              // simulation à 50 pas/s, quel que soit l'écran
                 while (!disp.shouldClose() && !disp.key(GLFW_KEY_ESCAPE)) {
-                    scene.setInput(readJoyx(disp), readJoyy(disp), readJoyb(disp), readJoys(disp));
-                    scene.tick();
+                    for (int n = clock.steps(); n > 0; n--) {
+                        scene.setInput(readJoyx(disp), readJoyy(disp), readJoyb(disp), readJoys(disp));
+                        scene.tick();
+                    }
                     scene.renderFrame();
                     present(disp, Mem.l(Vars.cop));
                 }
@@ -72,11 +75,14 @@ public final class Main {
             // --- partie (nouvelle ou reprise depuis un point de contrôle) ---
             Game game = new Game();
             game.boot(W, H, menu.selectedAction == Menu.Action.CONTINUE ? menu.selectedCheckpoint : 0);
+            Clock clock = new Clock();                    // simulation à 50 pas/s, quel que soit l'écran
             while (!disp.shouldClose() && !disp.key(GLFW_KEY_ESCAPE)) {
-                if (game.scene != null) {
-                    game.scene.setInput(readJoyx(disp), readJoyy(disp), readJoyb(disp), readJoys(disp));
+                for (int n = clock.steps(); n > 0 && !game.over; n--) {
+                    if (game.scene != null) {
+                        game.scene.setInput(readJoyx(disp), readJoyy(disp), readJoyb(disp), readJoys(disp));
+                    }
+                    game.update(readJoyb(disp) != 0);
                 }
-                game.update(readJoyb(disp) != 0);
                 game.render();
                 present(disp, Mem.l(Vars.cop));
                 if (game.over) {                          // écran de fin : attend le feu puis retour menu
