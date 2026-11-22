@@ -3,8 +3,8 @@ plugins {
 }
 
 /**
- * Gloom sur Android — UN seul APK, les deux moteurs dedans : le rasteriseur 2D fidèle et la vue 3D
- * jMonkeyEngine. Le launcher au démarrage choisit, comme sur desktop (`gradle run`).
+ * Gloom sur Android — le rasteriseur 2D fidèle. (La vue 3D « Gloom Rebirth » a son propre APK,
+ * dans le projet voisin ../../../gloom-rebirth/java/android.)
  *
  * Les sources du moteur ne sont pas dupliquées : ../src est compilé tel quel.
  */
@@ -18,10 +18,6 @@ android {
         targetSdk 34
         versionCode 3
         versionName '0.6'
-        ndk {
-            // jme3-android-native fournit 4 ABI ; on garde celles des téléphones réels
-            abiFilters 'arm64-v8a', 'armeabi-v7a'
-        }
     }
 
     compileOptions {
@@ -40,7 +36,6 @@ android {
                     'gloom/host/Display.java',         // fenêtre GLFW   → SurfaceView
                     'gloom/host/Audio.java',           // OpenAL         → AndroidAudio
                     'gloom/host/DisplayTest.java',
-                    'gloom/rebirth/DesktopGlue.java',  // GLFW + AWT : SEUL fichier 3D non portable
             ]
             manifest.srcFile 'src/main/AndroidManifest.xml'
             res.srcDirs = ['src/main/res']
@@ -52,21 +47,16 @@ android {
             minifyEnabled false
         }
         release {
-            minifyEnabled false     // le moteur ne fait de réflexion que sur HostGlue, R8 n'apporte rien
+            minifyEnabled false
             signingConfig signingConfigs.debug
         }
     }
 
     packaging {
         resources.excludes += ['META-INF/**']
-        jniLibs.useLegacyPackaging true       // les .so de jME viennent d'un JAR simple, pas d'un AAR
     }
 }
 
 dependencies {
-    def jme = '3.6.1-stable'
-    implementation "org.jmonkeyengine:jme3-core:$jme"
-    implementation "org.jmonkeyengine:jme3-android:$jme"          // AndroidHarness + renderer GLES
-    implementation "org.jmonkeyengine:jme3-effects:$jme"          // FogFilter / BloomFilter
-    runtimeOnly "org.jmonkeyengine:jme3-android-native:$jme"      // .so : openalsoft, decode, bufferallocator
+    // aucune : le moteur 2D ne dépend que du SDK Android
 }

@@ -20,21 +20,14 @@ Ported by **Guillaume Monet**.
 
 ---
 
-## Two renderers, one simulation
+## The renderer
 
-A launcher offers two views at startup. They share **exactly** the same game code: the same
-emulated 68k RAM, the same object lists, the same AI, the same campaign script. Only the display
-changes.
+The original rasteriser, ported, at 320 × 240 internally: pixel fidelity.
 
-| | **GLOOM CLASSIC** | **GLOOM REBIRTH** |
-|---|---|---|
-| rendering | the original rasteriser, ported | a real 3D scene (jMonkeyEngine) |
-| internal resolution | 320 × 240 | the screen's own |
-| what you get | pixel fidelity | dynamic lighting, shadows, bloom, mouselook |
+![Gloom Classic](docs/img/classic-2d.png)
 
-| CLASSIC (2D) | REBIRTH (3D) |
-|---|---|
-| ![Gloom Classic](docs/img/classic-2d.png) | ![Gloom Rebirth](docs/img/rebirth-3d.png) |
+> The real-time 3D view (jMonkeyEngine, dynamic lighting, mouselook) is a separate project,
+> **`../../gloom-rebirth/`**, which compiles this project's simulation as is.
 
 The HUD, the menus and the story screens are the game's own, decoded from its own data (IFF
 images, 7-plane Amiga font):
@@ -73,13 +66,9 @@ equivalent here. In their place sits a thin **host layer**: LWJGL 3 (GLFW/OpenGL
 the Android APIs on phones. The engine knows nothing about it.
 
 The decoupling is real and measurable: out of the port's ~13,500 lines, only **four files** depend
-on LWJGL (`host/Main`, `host/Display`, `host/Audio`, `rebirth/DesktopGlue`), and the Android APK
-compiles the **same sources** as the desktop build, without a single duplicated line. Two
-interfaces isolate the rest:
-
-- `HostGlue` — the three things in the 3D view that aren't portable (cursor lock and framebuffer
-  size via GLFW, PNG screenshot writing via AWT);
-- `AudioBackend` — OpenAL on PC, `AudioTrack` on Android.
+on LWJGL (`host/Main`, `host/Display`, `host/Audio`, `host/DisplayTest`), and the Android APK
+compiles the **same sources** as the desktop build, without a single duplicated line. One
+interface isolates the audio: `AudioBackend` — OpenAL on PC, `AudioTrack` on Android.
 
 ### Audio rebuilt the way Paula did it
 
@@ -92,26 +81,14 @@ else nothing) — then mixed with the music into a single stream.
 The MED music (MMD0/MMD1) is a player written for this port: sequencer plus 4-voice mixer, the
 original replayer being a non-portable 68k blob.
 
-### One simulation behind both renderers
-
-The 3D view isn't a second game. It **reads the world state out of the 68k RAM** every frame and
-translates it into a jMonkeyEngine scene: walls extruded from the map's zones, the original sprites
-as billboards (with the 8-direction frame selection), gore decals on the floor, blood drops as a
-single mesh. The simulation runs on a fixed timestep (1/60 s), so gameplay keeps its speed whatever
-the framerate is.
-
 ### Android: what measuring taught us
 
-The port runs on a phone (measured on a Xiaomi: 60 fps in 2D, ~55 in 3D). Two non-obvious findings,
-reached by instrumenting rather than guessing:
+The port runs on a phone (measured on a Xiaomi: 60 fps). One non-obvious finding, reached by
+instrumenting rather than guessing:
 
 - **The 2D ran at half speed** because `lockCanvas()` hands back a *software* canvas: scaling the
   320 × 240 framebuffer up to fullscreen was happening on the CPU. `Surface.lockHardwareCanvas()`
   was all it took (35 → 60 fps).
-- **In 3D, geometry costs nothing** — 204 triangles, 27 draw calls: this really is a 1995 game. All
-  of the cost is *per pixel*: 2.6 Mpx against 0.077 on the Amiga, with 14-light lighting. The only
-  effect that pushed past the frame budget was **full-resolution bloom**; computing it at quarter
-  resolution makes it free without changing how it looks.
 
 ---
 
@@ -132,9 +109,7 @@ reached by instrumenting rather than guessing:
 - **Dynamic geometry**: doors, rotating polygons, texture animations, trigger zones (ambushes,
   teleports, exit).
 - **Audio**: every effect, the monsters' ambient voices, and the MED music.
-- **3D view**: dynamic lighting (torch, muzzle flash, bullets), optional HD textures, thermal vision
-  through walls, a persistent options menu, remappable controls.
-- **Android**: a single APK with both renderers, touch controls, assets fetched on first run.
+- **Android**: an APK of the 2D engine, touch controls, assets fetched on first run.
 
 ## What's missing
 
@@ -163,9 +138,8 @@ Gloom/
 Then, from `java/`:
 
 ```bash
-gradle run                        # full game (2D / 3D launcher)
+gradle run                        # full game (logo → title menu → campaign)
 gradle run2                       # the gloom2.s variant (focshft 7 + castrots128)
-gradle rebirth                    # straight into the 3D view
 gradle run -Dscale=4              # bigger window (320×240 internally)
 gradle run -Dmap=map1_3 -Dtile=1  # a single level (testing / sightseeing)
 ```
@@ -177,13 +151,15 @@ Gradle 9.x. The LWJGL natives are set to Windows x64; for Linux/macOS, change `l
 `build.gradle` and build **on the target platform**.
 
 **Controls** — `W`/`S` or `↑`/`↓` forward/back, `A`/`D` strafe, `←`/`→` turn, left click / `Ctrl` /
-`Space` to fire and confirm, `Esc` to quit. In 3D the mouse aims, and the keys are remappable in the
-OPTIONS menu.
+`Space` to fire and confirm, `Esc` to quit.
+
+At startup the graphics card in use is printed; if it is an integrated chip, a warning is shown
+(console + window title) with the Windows fix.
 
 ### Android
 
-A single APK holds both renderers. **Left thumb**: forward, back, turn. **Right thumb**: strafe
-(◀ ▶) and fire. **MENU button**, top right: steps back one level (game → menu → launcher → quit),
+The APK holds the 2D engine (the 3D view has its own APK in `gloom-rebirth`). **Left thumb**: forward, back, turn. **Right thumb**: strafe
+(◀ ▶) and fire. **MENU button**, top right: steps back one level (game → menu → quit),
 same as the back key.
 
 Android 8.0 minimum. Assets are downloaded on first run (network needed that once only).
@@ -206,7 +182,6 @@ gradle bossTest           # dragon and deathhead
 gradle powerupTest        # powerups, messages, animated objects, soul suck
 gradle medTest            # MED player → med1.wav
 gradle levelRenderTest    # renders one frame of a real level → level.png
-gradle rebirth -Dshot     # screenshot of the 3D view → rebirth.png
 ```
 
 Each one prints `TOUT OK` or writes a demonstration PNG/WAV. `gradle tasks --group verification`
@@ -220,11 +195,9 @@ lists them all.
 |---|---|
 | `src/gloom/` | the engine: `Mem`, `M68k`, `Render`, `Objects`, `Player`, `Map`, `Events`, `Sfx`, `MedPlayer`… |
 | `src/gloom/host/` | the PC host layer (LWJGL): window, audio, game loop, HUD, menus, sequencer |
-| `src/gloom/rebirth/` | the jMonkeyEngine 3D view |
 | `src/gloom/data/` | the asm's `.data` sections: precomputed tables, `objinfo` |
 | `src/gloom/tools/` | the verification harnesses |
 | `android/` | the Android module (compiles `../src` as is) |
-| `scripts/` | side tooling (AI upscaling of the textures for HD mode) |
 | `dist/` | the asset-fetching scripts shipped with the package |
 
 ---

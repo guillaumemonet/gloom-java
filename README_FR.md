@@ -20,21 +20,14 @@ Porté par **Guillaume Monet**.
 
 ---
 
-## Deux moteurs, une seule simulation
+## Le rendu
 
-Au lancement, un écran propose deux rendus. Ils partagent **exactement** le même code de jeu :
-même RAM 68k émulée, mêmes listes d'objets, même IA, même script de campagne. Seul l'affichage
-change.
+Le rasteriseur d'origine, porté, en 320 × 240 interne : la fidélité au pixel.
 
-| | **GLOOM CLASSIC** | **GLOOM REBIRTH** |
-|---|---|---|
-| rendu | le rasteriseur d'origine, porté | scène 3D réelle (jMonkeyEngine) |
-| résolution interne | 320 × 240 | celle de l'écran |
-| ce qu'on y gagne | la fidélité au pixel | éclairage dynamique, ombres, bloom, mouselook |
+![Gloom Classic](docs/img/classic-2d.png)
 
-| CLASSIC (2D) | REBIRTH (3D) |
-|---|---|
-| ![Gloom Classic](docs/img/classic-2d.png) | ![Gloom Rebirth](docs/img/rebirth-3d.png) |
+> La vue 3D temps réel (jMonkeyEngine, éclairage dynamique, mouselook) est un projet séparé,
+> **`../../gloom-rebirth/`**, qui compile la simulation de ce projet-ci telle quelle.
 
 Le HUD, les menus et les écrans d'histoire sont ceux du jeu, décodés depuis ses propres données
 (images IFF, fonte Amiga à 7 plans) :
@@ -73,13 +66,9 @@ d'équivalent utile ici. À la place, une **couche hôte** mince : LWJGL 3 (GLFW
 PC, les API Android sur téléphone. Le moteur ne la connaît pas.
 
 Le découplage est réel et mesurable : sur les ~13 500 lignes du portage, seuls **quatre fichiers**
-dépendent de LWJGL (`host/Main`, `host/Display`, `host/Audio`, `rebirth/DesktopGlue`), et l'APK
-Android compile les **mêmes sources** que le desktop, sans une ligne dupliquée. Deux interfaces
-suffisent à isoler le reste :
-
-- `HostGlue` — les trois choses de la vue 3D qui ne sont pas portables (verrou du curseur et taille
-  du framebuffer via GLFW, écriture d'une capture PNG via AWT) ;
-- `AudioBackend` — OpenAL sur PC, `AudioTrack` sur Android.
+dépendent de LWJGL (`host/Main`, `host/Display`, `host/Audio`, `host/DisplayTest`), et l'APK
+Android compile les **mêmes sources** que le desktop, sans une ligne dupliquée. Une interface
+suffit à isoler l'audio : `AudioBackend` — OpenAL sur PC, `AudioTrack` sur Android.
 
 ### L'audio refait à la manière de Paula
 
@@ -92,26 +81,14 @@ prioritaire, sinon rien) — puis mixées avec la musique dans un unique flux.
 La musique MED (MMD0/MMD1) est un lecteur écrit pour le portage : séquenceur + mixeur 4 voies,
 le replayer d'origine étant un blob 68k non portable.
 
-### Une seule simulation pour les deux rendus
-
-La vue 3D n'est pas un second jeu. Elle **lit l'état du monde dans la RAM 68k** à chaque frame et
-le traduit en scène jMonkeyEngine : murs extrudés depuis les zones de la map, sprites d'origine en
-billboards (avec la sélection de frame à 8 directions), décals de gore au sol, gouttes de sang en
-un seul mesh. La simulation tourne à pas de temps fixe (1/60 s), donc le gameplay garde sa vitesse
-quel que soit le framerate.
-
 ### Android : ce que la mesure a appris
 
-Le portage tourne sur téléphone (mesuré sur un Xiaomi : 60 images/s en 2D, ~55 en 3D). Deux
-constats non évidents, obtenus en instrumentant plutôt qu'en devinant :
+Le portage tourne sur téléphone (mesuré sur un Xiaomi : 60 images/s). Un constat non évident,
+obtenu en instrumentant plutôt qu'en devinant :
 
 - **La 2D tournait à moitié vitesse** parce que `lockCanvas()` rend un canvas *logiciel* :
   l'agrandissement du framebuffer 320 × 240 vers le plein écran se faisait au processeur.
   `Surface.lockHardwareCanvas()` a suffi (35 → 60 images/s).
-- **En 3D, la géométrie ne coûte rien** — 204 triangles, 27 appels de dessin : c'est bien un jeu de
-  1995. Tout le coût est *par pixel* : 2,6 Mpx contre 0,077 sur Amiga, avec un éclairage à 14
-  lumières. Le seul effet qui faisait déborder le budget d'image était le **bloom en pleine
-  résolution** ; le calculer au quart de résolution le rend gratuit sans changer son aspect.
 
 ---
 
@@ -132,9 +109,7 @@ constats non évidents, obtenus en instrumentant plutôt qu'en devinant :
 - **Géométrie dynamique** : portes, polygones en rotation, animations de textures, zones-trigger
   (embuscades, téléports, sortie).
 - **Audio** : tous les effets, les voix d'ambiance des monstres, et la musique MED.
-- **Vue 3D** : éclairage dynamique (torche, flash de bouche, balles), textures HD optionnelles,
-  vision thermique à travers les murs, menu d'options persistant, contrôles remappables.
-- **Android** : un seul APK, les deux moteurs, commandes tactiles, assets récupérés au premier
+- **Android** : APK du moteur 2D, commandes tactiles, assets récupérés au premier
   lancement.
 
 ## Ce qui manque
@@ -166,9 +141,8 @@ Gloom/
 Puis, depuis `java/` :
 
 ```bash
-gradle run                        # partie complète (launcher 2D / 3D)
+gradle run                        # partie complète (logo → menu titre → campagne)
 gradle run2                       # variante gloom2.s (focshft 7 + castrots128)
-gradle rebirth                    # vue 3D directement
 gradle run -Dscale=4              # fenêtre plus grande (interne 320×240)
 gradle run -Dmap=map1_3 -Dtile=1  # un seul niveau (test/visite)
 ```
@@ -180,14 +154,16 @@ Les natives LWJGL sont réglées sur Windows x64 ; pour Linux/macOS, changez `lw
 `build.gradle` et construisez **sur la plateforme cible**.
 
 **Contrôles** — `W`/`S` ou `↑`/`↓` avancer/reculer, `A`/`D` pas de côté, `←`/`→` tourner, clic
-gauche / `Ctrl` / `Espace` tirer et valider, `Échap` quitter. En 3D, la souris vise et les touches
-sont remappables dans le menu OPTIONS.
+gauche / `Ctrl` / `Espace` tirer et valider, `Échap` quitter.
+
+Au démarrage, la carte graphique utilisée est affichée ; si c'est une puce intégrée, un
+avertissement apparaît (console + titre de la fenêtre) avec le correctif Windows.
 
 ### Android
 
-Un seul APK contient les deux moteurs. **Pouce gauche** : avancer, reculer, tourner. **Pouce
+L'APK contient le moteur 2D (la 3D a son propre APK dans `gloom-rebirth`). **Pouce gauche** : avancer, reculer, tourner. **Pouce
 droit** : pas de côté (◀ ▶) et tir. **Bouton MENU** en haut à droite : recule d'un cran
-(partie → menu → launcher → quitter), comme la touche retour.
+(partie → menu → quitter), comme la touche retour.
 
 Android 8.0 minimum. Les assets sont téléchargés au premier lancement (réseau nécessaire cette
 fois-là seulement).
@@ -211,7 +187,6 @@ gradle bossTest           # dragon et deathhead
 gradle powerupTest        # powerups, messages, objets animés, aspiration
 gradle medTest            # lecteur MED → med1.wav
 gradle levelRenderTest    # rend une frame d'un vrai niveau → level.png
-gradle rebirth -Dshot     # capture de la vue 3D → rebirth.png
 ```
 
 Chacun affiche `TOUT OK` ou écrit un PNG/WAV de démonstration. `gradle tasks --group verification`
@@ -225,11 +200,9 @@ donne la liste complète.
 |---|---|
 | `src/gloom/` | le moteur : `Mem`, `M68k`, `Render`, `Objects`, `Player`, `Map`, `Events`, `Sfx`, `MedPlayer`… |
 | `src/gloom/host/` | couche hôte PC (LWJGL) : fenêtre, audio, boucle de jeu, HUD, menus, séquenceur |
-| `src/gloom/rebirth/` | la vue 3D jMonkeyEngine |
 | `src/gloom/data/` | sections `.data` de l'asm : tables précalculées, `objinfo` |
 | `src/gloom/tools/` | les harnais de vérification |
 | `android/` | module Android (compile `../src` tel quel) |
-| `scripts/` | outillage annexe (upscale IA des textures pour le mode HD) |
 | `dist/` | scripts de récupération des assets livrés avec le paquet |
 
 ---

@@ -23,8 +23,6 @@ public final class GloomActivity extends Activity {
         view = new GameView(this);
         // finish() depuis le fil de jeu : on repasse par le fil principal, c'est son contrat
         view.setOnExit(() -> runOnUiThread(this::finish));
-        view.setOnLaunch3d(() -> runOnUiThread(() ->
-                startActivity(new android.content.Intent(this, gloom.android3d.RebirthActivity.class))));
         setContentView(view);
         immersive();
     }

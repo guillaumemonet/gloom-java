@@ -57,7 +57,6 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
     private final File assetRoot;
     private AndroidAudio audio;
     private Runnable onExit;                   // ferme l'activité quand la boucle se termine
-    private Runnable onLaunch3d;               // démarre la vue 3D (autre processus)
 
     public GameView(Context ctx) {
         super(ctx);
@@ -112,11 +111,6 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
         onExit = r;
     }
 
-    /** Action qui démarre la vue 3D depuis le launcher. */
-    public void setOnLaunch3d(Runnable r) {
-        onLaunch3d = r;
-    }
-
     /** Touche/geste RETOUR d'Android : même effet que le bouton MENU à l'écran. */
     public void onBack() {
         pad.tapMenu();
@@ -158,70 +152,20 @@ public final class GameView extends SurfaceView implements SurfaceHolder.Callbac
 
         Render.setupFramebuffer(W, H);
 
-        // launcher → menu titre → partie. Le bouton MENU (et la touche retour) recule d'un cran :
-        // partie → menu, menu → launcher, launcher → on quitte.
-        while (running) {
-            if (!chooseEngine()) break;
-            titleMenu();
-        }
+        // menu titre → partie. Le bouton MENU (et la touche retour) recule d'un cran :
+        // partie → menu, menu → on quitte.
+        titleMenu();
         if (onExit != null) onExit.run();
     }
 
-    /**
-     * Launcher, le même que sur desktop ({@code Main.chooseEngine}) : les deux moteurs du portage
-     * sont dans l'APK et on choisit au démarrage.
-     *
-     * <ul>
-     *   <li><b>GLOOM CLASSIC</b> — le rasteriseur 2D fidèle, qui tourne dans CE processus ;</li>
-     *   <li><b>GLOOM REBIRTH</b> — la vue 3D jMonkeyEngine, lancée dans son propre processus
-     *       ({@code RebirthActivity}), pour repartir d'un état mémoire vierge.</li>
-     * </ul>
-     *
-     * @return false si on quitte l'application
-     */
-    private boolean chooseEngine() {
-        final String[] name = { "GLOOM CLASSIC", "GLOOM REBIRTH" };
-        final String[] sub = { "MOTEUR 2D D'ORIGINE", "VUE 3D" };
-        int sel = 0;
-        boolean prevUp = false, prevDown = false, prevFire = true;   // ignore un feu déjà tenu
-        pad.consumeMenuTap();
-        while (running) {
-            if (pad.consumeMenuTap()) return false;                  // retour = quitter l'app
-            boolean up = pad.up(), down = pad.down(), fire = pad.fire();
-            if ((up && !prevUp) || (down && !prevDown)) sel ^= 1;
-            prevUp = up; prevDown = down;
-
-            int fb = Mem.l(Vars.cop);
-            for (int i = 0; i < W * H; i++) Mem.ww(fb + i * 2, 0);
-            Font.drawCenteredBig(fb, W, H, H / 2 - 66, "GLOOM", 0x96f);
-            Font.drawCenteredBig(fb, W, H, H / 2 - 22, name[0], sel == 0 ? 0xfff : 0x70a);
-            Font.drawCentered(fb, W, H, H / 2 - 8, sub[0], sel == 0 ? 0x0ff : 0x406);
-            Font.drawCenteredBig(fb, W, H, H / 2 + 16, name[1], sel == 1 ? 0xfff : 0x70a);
-            Font.drawCentered(fb, W, H, H / 2 + 30, sub[1], sel == 1 ? 0x0ff : 0x406);
-            Font.drawCentered(fb, W, H, H - 16, "STICK + FIRE", 0x0ff);
-            present();
-
-            if (fire && !prevFire) {
-                if (sel == 1) {
-                    if (onLaunch3d != null) onLaunch3d.run();        // passe la main à jMonkeyEngine
-                    prevFire = true;
-                    continue;                                        // on reste au launcher au retour
-                }
-                return true;
-            }
-            prevFire = fire;
-        }
-        return false;
-    }
-
-    /** Menu titre et parties. Revient au launcher sur MENU ; {@code running=false} sur EXIT. */
+    /** Menu titre et parties. Quitte l'app sur MENU ou EXIT. */
     private void titleMenu() {
         while (running) {
             Menu menu = new Menu();
             menu.init(W, H);
             pad.consumeMenuTap();                        // ignore l'appui qui nous a amenés ici
             while (running && menu.selectedAction == Menu.Action.NONE) {
-                if (pad.consumeMenuTap()) return;        // retour au launcher
+                if (pad.consumeMenuTap()) return;        // retour = quitter l'app
                 menu.update(pad.up(), pad.down(), pad.fire());
                 menu.render();
                 present();
