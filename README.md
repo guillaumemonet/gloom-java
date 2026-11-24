@@ -1,6 +1,6 @@
 # Gloom — Java port
 
-*Read this in [French](README_FR.md).*
+*Read this in [French](README_fr.md).*
 
 A Java port of **Gloom** (Black Magic Software, Amiga 1995), the first Doom clone to ship on the
 Amiga. The engine is rewritten **line by line from the original 68020 assembly**
