@@ -237,20 +237,40 @@ Ready-made binaries are on the
 
 ---
 
-## Licence and credits
+## Legal Notice & Game Assets
 
-*Gloom* is © **Black Magic Software**. The **original `.s`/`.bb2` sources are public domain** (see
-the `GloomAmiga` repository) and are this port's reference.
+### Independent Engine Implementation
 
-The **game data** — graphics, sounds, maps — **is not**, and is **never redistributed** here: neither
-the repository, nor the PC package, nor the APK contains it. It is read from the **Gloom Deluxe**
-floppy images, which the game offers to fetch from
-[Amiga Museum](https://amigamuseum.emu-france.info) on first run. Only `gloom.s`'s compile-time
-`incbin`s (tables, built-in sprites), which are part of the sources, are versioned.
+This project is an independent reimplementation of the *Gloom* engine, designed to reproduce the original game's behavior on modern platforms.
 
-Original engine: **Black Magic Software** (1995).
-Java port: **Guillaume Monet**.
+The engine has been developed from the original source code (`.s`/`.bb2`), released into the public domain ([earok/GloomAmiga](https://github.com/earok/GloomAmiga)), through technical analysis and compatibility testing. That source code is not included in this repository.
 
-The port was carried out with AI assistance (Claude, Anthropic): writing the translation code, the
-verification harnesses and the instrumentation. The architectural decisions, the validation against
-the original assembly and the result remain the author's own.
+### Original Game Files
+
+This project requires original game files, such as Amiga ADF disk images, to run.
+
+**Original game files are not included in this project.**
+
+Users must obtain and provide their own game files from a legally authorized source. Before downloading or using this engine, users are required to confirm that they possess a legally obtained copy of the original game.
+
+The game reads the two **Gloom Deluxe** floppy images and offers to download them from [Amiga Museum](https://amigamuseum.emu-france.info) on first run, doing nothing without the user's consent. Neither the repository, the PC package nor the APK contains the game data; only `gloom.s`'s compile-time `incbin`s (tables, built-in sprites), which are part of the sources, are versioned.
+
+Eloane Studio does not host, distribute, or provide unauthorized copies of copyrighted game assets.
+
+### Copyright & Trademarks
+
+All original game names, trademarks, graphics, music, and other proprietary assets of *Gloom* remain the property of their respective copyright holders (Black Magic Software).
+
+This project is an independent, unofficial implementation and is not affiliated with, endorsed by, or sponsored by the original game's developers or publishers.
+
+### Preservation
+
+The purpose of this project is to preserve the technical behavior and gameplay experience of classic video games while making them accessible on modern systems.
+
+The engine is provided for compatibility, preservation, and educational purposes.
+
+### Credits
+
+Original engine: **Black Magic Software** (1995). Java port: **Guillaume Monet**.
+
+The port was carried out with AI assistance (Claude, Anthropic): writing the translation code, the verification harnesses and the instrumentation. The architectural decisions, the validation against the original assembly and the result remain the author's own.

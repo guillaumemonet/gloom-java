@@ -242,20 +242,40 @@ Les binaires prêts à l'emploi sont dans les
 
 ---
 
-## Licence et crédits
+## Mentions légales et données du jeu
 
-*Gloom* est © **Black Magic Software**. Les **sources `.s`/`.bb2` d'origine sont dans le domaine
-public** (cf. le dépôt `GloomAmiga`) et constituent la référence de ce portage.
+### Implémentation indépendante du moteur
 
-Les **données du jeu** — graphismes, sons, maps — **ne le sont pas** et ne sont **jamais
-redistribuées** ici : ni le dépôt, ni le paquet PC, ni l'APK ne les contiennent. Elles sont lues
-dans les disquettes de **Gloom Deluxe**, que le jeu propose de récupérer sur
-[Amiga Museum](https://amigamuseum.emu-france.info) au premier lancement. Seuls les `incbin` de
-compilation de `gloom.s` (tables, sprites intégrés), qui font partie des sources, sont versionnés.
+Ce projet est une réimplémentation indépendante du moteur de *Gloom*, conçue pour reproduire le comportement du jeu d'origine sur les plateformes modernes.
 
-Moteur d'origine : **Black Magic Software** (1995).
-Portage Java : **Guillaume Monet**.
+Le moteur a été développé à partir du code source d'origine (`.s`/`.bb2`), placé dans le domaine public ([earok/GloomAmiga](https://github.com/earok/GloomAmiga)), par analyse technique et tests de compatibilité. Ce code source n'est pas inclus dans ce dépôt.
 
-Le portage a été mené avec l'assistance d'une IA (Claude, Anthropic) : écriture du code de
-traduction, harnais de vérification et instrumentation. Les choix d'architecture, la validation
-contre l'assembleur d'origine et le résultat restent ceux de l'auteur.
+### Fichiers du jeu d'origine
+
+Ce projet nécessite des fichiers du jeu d'origine, comme les images de disquettes Amiga (ADF), pour fonctionner.
+
+**Les fichiers du jeu d'origine ne sont pas inclus dans ce projet.**
+
+Chaque utilisateur doit se procurer et fournir ses propres fichiers de jeu auprès d'une source légalement autorisée. Avant de télécharger ou d'utiliser ce moteur, l'utilisateur doit confirmer qu'il possède une copie du jeu d'origine obtenue légalement.
+
+Le jeu lit les deux disquettes de **Gloom Deluxe** et propose de les télécharger depuis [Amiga Museum](https://amigamuseum.emu-france.info) au premier lancement, sans rien faire sans l'accord de l'utilisateur. Ni le dépôt, ni le paquet PC, ni l'APK ne contiennent les données du jeu ; seuls les `incbin` de compilation de `gloom.s` (tables, sprites intégrés), qui font partie des sources, sont versionnés.
+
+Eloane Studio n'héberge, ne distribue ni ne fournit de copies non autorisées de données de jeu protégées par le droit d'auteur.
+
+### Droits d'auteur et marques
+
+Les noms, marques, graphismes, musiques et autres éléments propriétaires de *Gloom* restent la propriété de leurs titulaires respectifs (Black Magic Software).
+
+Ce projet est une implémentation indépendante et non officielle ; il n'est ni affilié, ni approuvé, ni soutenu par les développeurs ou les éditeurs du jeu d'origine.
+
+### Préservation
+
+Ce projet a pour but de préserver le comportement technique et l'expérience de jeu des jeux vidéo classiques, tout en les rendant accessibles sur les systèmes modernes.
+
+Le moteur est fourni à des fins de compatibilité, de préservation et d'éducation.
+
+### Crédits
+
+Moteur d'origine : **Black Magic Software** (1995). Portage Java : **Guillaume Monet**.
+
+Le portage a été mené avec l'assistance d'une IA (Claude, Anthropic) : écriture du code de traduction, harnais de vérification et instrumentation. Les choix d'architecture, la validation contre l'assembleur d'origine et le résultat restent ceux de l'auteur.
